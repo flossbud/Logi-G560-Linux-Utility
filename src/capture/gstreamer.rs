@@ -1,7 +1,7 @@
 use std::{
     os::fd::AsRawFd,
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicU64, Ordering},
     },
 };
@@ -23,6 +23,112 @@ pub struct GStreamerFrameSource {
 struct RgbTail {
     appsink: gst_app::AppSink,
     expected_dimensions: Arc<AtomicU64>,
+}
+
+struct OutputCapsUpdate {
+    revision: u64,
+    dimensions: (u32, u32),
+    caps: gst::Caps,
+}
+
+impl OutputCapsUpdate {
+    fn new(dimensions: (u32, u32)) -> Result<Self, String> {
+        let width = i32::try_from(dimensions.0)
+            .map_err(|_| format!("scaled width does not fit GStreamer caps: {}", dimensions.0))?;
+        let height = i32::try_from(dimensions.1).map_err(|_| {
+            format!(
+                "scaled height does not fit GStreamer caps: {}",
+                dimensions.1
+            )
+        })?;
+        let caps = gst::Caps::builder("video/x-raw")
+            .field("format", "RGB")
+            .field("width", width)
+            .field("height", height)
+            .field("pixel-aspect-ratio", gst::Fraction::new(1, 1))
+            .build();
+        Ok(Self {
+            revision: 0,
+            dimensions,
+            caps,
+        })
+    }
+}
+
+#[derive(Default)]
+struct OutputCapsState {
+    revision: u64,
+    pending: Option<OutputCapsUpdate>,
+    worker_running: bool,
+}
+
+struct OutputCapsCoordinator {
+    state: Mutex<OutputCapsState>,
+    expected_dimensions: Arc<AtomicU64>,
+}
+
+impl OutputCapsCoordinator {
+    fn new(expected_dimensions: Arc<AtomicU64>) -> Self {
+        Self {
+            state: Mutex::new(OutputCapsState::default()),
+            expected_dimensions,
+        }
+    }
+
+    fn request(&self, mut update: OutputCapsUpdate) -> bool {
+        let mut state = self.lock_state();
+        state.revision = state.revision.wrapping_add(1);
+        update.revision = state.revision;
+        state.pending = Some(update);
+        self.expected_dimensions.store(0, Ordering::Release);
+        if state.worker_running {
+            false
+        } else {
+            state.worker_running = true;
+            true
+        }
+    }
+
+    fn invalidate(&self) {
+        let mut state = self.lock_state();
+        state.revision = state.revision.wrapping_add(1);
+        state.pending = None;
+        self.expected_dimensions.store(0, Ordering::Release);
+    }
+
+    fn drain(&self, mut install: impl FnMut(&OutputCapsUpdate)) {
+        loop {
+            let update = {
+                let mut state = self.lock_state();
+                let Some(update) = state.pending.take() else {
+                    state.worker_running = false;
+                    return;
+                };
+                update
+            };
+
+            install(&update);
+
+            let mut state = self.lock_state();
+            if state.revision == update.revision {
+                debug_assert!(state.pending.is_none());
+                self.expected_dimensions
+                    .store(pack_dimensions(update.dimensions), Ordering::Release);
+                state.worker_running = false;
+                return;
+            }
+            if state.pending.is_none() {
+                state.worker_running = false;
+                return;
+            }
+        }
+    }
+
+    fn lock_state(&self) -> std::sync::MutexGuard<'_, OutputCapsState> {
+        self.state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
 }
 
 struct CaptureResources {
@@ -162,8 +268,7 @@ fn install_output_caps_probe(
         .static_pad("src")
         .ok_or_else(|| gst_error("source pad lookup", "source has no static src pad"))?;
     let caps_filter = caps_filter.clone();
-    let expected_dimensions = expected_dimensions.clone();
-    let caps_generation = Arc::new(AtomicU64::new(0));
+    let coordinator = Arc::new(OutputCapsCoordinator::new(expected_dimensions.clone()));
     source_pad.add_probe(gst::PadProbeType::EVENT_DOWNSTREAM, move |_, info| {
         let Some(event) = info.event() else {
             return gst::PadProbeReturn::Ok;
@@ -172,26 +277,22 @@ fn install_output_caps_probe(
             return gst::PadProbeReturn::Ok;
         };
 
-        expected_dimensions.store(0, Ordering::Release);
-        let generation = caps_generation.fetch_add(1, Ordering::AcqRel) + 1;
         match scaled_output_caps(caps_event.caps()) {
-            Ok((dimensions, caps)) => {
-                if caps_filter.property::<gst::Caps>("caps") == caps {
-                    expected_dimensions.store(pack_dimensions(dimensions), Ordering::Release);
-                    return gst::PadProbeReturn::Ok;
+            Ok(update) => {
+                if coordinator.request(update) {
+                    let coordinator = coordinator.clone();
+                    caps_filter.call_async(move |caps_filter| {
+                        coordinator.drain(|update| {
+                            if caps_filter.property::<gst::Caps>("caps") != update.caps {
+                                caps_filter.set_property("caps", &update.caps);
+                            }
+                        });
+                    });
                 }
-                let expected_dimensions = expected_dimensions.clone();
-                let caps_generation = caps_generation.clone();
-                caps_filter.call_async(move |caps_filter| {
-                    if caps_generation.load(Ordering::Acquire) != generation {
-                        return;
-                    }
-                    caps_filter.set_property("caps", &caps);
-                    expected_dimensions.store(pack_dimensions(dimensions), Ordering::Release);
-                });
                 gst::PadProbeReturn::Ok
             }
             Err(message) => {
+                coordinator.invalidate();
                 gst::element_error!(
                     caps_filter,
                     gst::StreamError::Format,
@@ -205,25 +306,11 @@ fn install_output_caps_probe(
     Ok(())
 }
 
-fn scaled_output_caps(caps: &gst::CapsRef) -> Result<((u32, u32), gst::Caps), String> {
+fn scaled_output_caps(caps: &gst::CapsRef) -> Result<OutputCapsUpdate, String> {
     let info = VideoInfo::from_caps(caps).map_err(|_| format!("unsupported caps: {caps}"))?;
     let dimensions = proportional_dimensions(info.width(), info.height(), 160)
         .ok_or_else(|| format!("invalid dimensions in caps: {caps}"))?;
-    let width = i32::try_from(dimensions.0)
-        .map_err(|_| format!("scaled width does not fit GStreamer caps: {}", dimensions.0))?;
-    let height = i32::try_from(dimensions.1).map_err(|_| {
-        format!(
-            "scaled height does not fit GStreamer caps: {}",
-            dimensions.1
-        )
-    })?;
-    let caps = gst::Caps::builder("video/x-raw")
-        .field("format", "RGB")
-        .field("width", width)
-        .field("height", height)
-        .field("pixel-aspect-ratio", gst::Fraction::new(1, 1))
-        .build();
-    Ok((dimensions, caps))
+    OutputCapsUpdate::new(dimensions)
 }
 
 fn pack_dimensions((width, height): (u32, u32)) -> u64 {
@@ -481,7 +568,12 @@ fn gst_error(stage: &'static str, error: impl std::fmt::Display) -> CaptureError
 #[cfg(test)]
 mod tests {
     use std::{
-        sync::{Arc, atomic::AtomicU64},
+        sync::{
+            Arc, Mutex,
+            atomic::{AtomicU64, Ordering},
+            mpsc,
+        },
+        thread,
         time::Duration,
     };
 
@@ -590,6 +682,50 @@ mod tests {
         let frame = super::frame_from_expected_sample(&full_resolution, &expected).unwrap();
 
         assert!(frame.is_none());
+    }
+
+    #[test]
+    fn newer_caps_request_prevents_delayed_update_from_reopening_stale_gate() {
+        gst::init().unwrap();
+        let expected_dimensions = Arc::new(AtomicU64::new(0));
+        let coordinator = Arc::new(super::OutputCapsCoordinator::new(
+            expected_dimensions.clone(),
+        ));
+        let portrait = super::OutputCapsUpdate::new((160, 284)).unwrap();
+        let ultrawide = super::OutputCapsUpdate::new((160, 69)).unwrap();
+        assert!(coordinator.request(portrait));
+
+        let (started_tx, started_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let applied = Arc::new(Mutex::new(Vec::new()));
+        let worker = coordinator.clone();
+        let worker_expected = expected_dimensions.clone();
+        let worker_applied = applied.clone();
+        let handle = thread::spawn(move || {
+            worker.drain(|update| {
+                if update.dimensions == (160, 284) {
+                    started_tx.send(()).unwrap();
+                    release_rx.recv().unwrap();
+                    assert_eq!(worker_expected.load(Ordering::Acquire), 0);
+                } else {
+                    assert_eq!(update.dimensions, (160, 69));
+                    assert_eq!(worker_expected.load(Ordering::Acquire), 0);
+                }
+                worker_applied.lock().unwrap().push(update.dimensions);
+            });
+        });
+
+        started_rx.recv().unwrap();
+        assert!(!coordinator.request(ultrawide));
+        assert_eq!(expected_dimensions.load(Ordering::Acquire), 0);
+        release_tx.send(()).unwrap();
+        handle.join().unwrap();
+
+        assert_eq!(applied.lock().unwrap().as_slice(), &[(160, 284), (160, 69)]);
+        assert_eq!(
+            expected_dimensions.load(Ordering::Acquire),
+            super::pack_dimensions((160, 69))
+        );
     }
 
     fn frame_through_scaled_rgb_pipeline(dimensions: (usize, usize)) -> RgbFrame {
