@@ -110,7 +110,7 @@ async fn main() -> Result<()> {
         Command::CaptureTest { frames } => {
             let grant = PortalCapture::open(None).await?;
             let permission_is_persistent = grant.restore_token.is_some();
-            let mut source = GStreamerFrameSource::open(grant)?;
+            let mut source = GStreamerFrameSource::open(grant).await?;
             let started = Instant::now();
             let capture_result: Result<(usize, usize)> = async {
                 let mut dimensions = None;

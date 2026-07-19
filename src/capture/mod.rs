@@ -33,4 +33,9 @@ pub enum CaptureError {
     },
     #[error("capture shutdown failed: {message}")]
     Shutdown { message: String },
+    #[error("{primary}; cleanup after that failure also failed: {cleanup}")]
+    Cleanup {
+        primary: Box<CaptureError>,
+        cleanup: Box<CaptureError>,
+    },
 }

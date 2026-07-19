@@ -45,63 +45,18 @@ impl ShutdownOperations for CaptureResources {
 }
 
 impl GStreamerFrameSource {
-    pub fn open(grant: PortalGrant) -> Result<Self, CaptureError> {
-        gst::init().map_err(|error| gst_error("initialization", error))?;
-        let (output_width, output_height) = output_dimensions_hint(grant.stream.size());
-
-        let pipewire = gst::ElementFactory::make("pipewiresrc")
-            .property("fd", grant.remote_fd.as_raw_fd())
-            .property("path", grant.stream.pipe_wire_node_id().to_string())
-            .property("do-timestamp", true)
-            .property_from_str("on-disconnect", "error")
-            .build()
-            .map_err(|error| gst_error("pipewiresrc construction", error))?;
-        let queue = gst::ElementFactory::make("queue")
-            .property_from_str("leaky", "downstream")
-            .property("max-size-buffers", 1_u32)
-            .build()
-            .map_err(|error| gst_error("queue construction", error))?;
-        let convert = gst::ElementFactory::make("videoconvert")
-            .build()
-            .map_err(|error| gst_error("videoconvert construction", error))?;
-        let scale = gst::ElementFactory::make("videoscale")
-            .build()
-            .map_err(|error| gst_error("videoscale construction", error))?;
-        let caps = gst::Caps::builder("video/x-raw")
-            .field("format", "RGB")
-            .field("width", output_width)
-            .field("height", output_height)
-            .field("pixel-aspect-ratio", gst::Fraction::new(1, 1))
-            .build();
-        let caps_filter = gst::ElementFactory::make("capsfilter")
-            .property("caps", &caps)
-            .build()
-            .map_err(|error| gst_error("capsfilter construction", error))?;
-        let appsink = latest_frame_appsink();
-
+    pub async fn open(grant: PortalGrant) -> Result<Self, CaptureError> {
+        if let Err(error) = gst::init().map_err(|error| gst_error("initialization", error)) {
+            return Err(cleanup_grant_after_failure(error, &grant).await);
+        }
         let pipeline = gst::Pipeline::default();
-        pipeline
-            .add_many([
-                &pipewire,
-                &queue,
-                &convert,
-                &scale,
-                &caps_filter,
-                appsink.upcast_ref(),
-            ])
-            .map_err(|error| gst_error("pipeline assembly", error))?;
-        gst::Element::link_many([
-            &pipewire,
-            &queue,
-            &convert,
-            &scale,
-            &caps_filter,
-            appsink.upcast_ref(),
-        ])
-        .map_err(|error| gst_error("pipeline linking", error))?;
-        pipeline
-            .set_state(gst::State::Playing)
-            .map_err(|error| gst_error("pipeline start", error))?;
+        let appsink = match build_pipeline(&pipeline, &grant) {
+            Ok(appsink) => appsink,
+            Err(primary) => {
+                let mut resources = CaptureResources { pipeline, grant };
+                return Err(cleanup_failed_setup(primary, &mut resources).await);
+            }
+        };
 
         Ok(Self {
             resources: CaptureResources { pipeline, grant },
@@ -113,6 +68,54 @@ impl GStreamerFrameSource {
     pub async fn shutdown(&mut self) -> Result<(), CaptureError> {
         shutdown_resources(&mut self.resources, &mut self.shutdown).await
     }
+}
+
+fn build_pipeline(
+    pipeline: &gst::Pipeline,
+    grant: &PortalGrant,
+) -> Result<gst_app::AppSink, CaptureError> {
+    let pipewire = gst::ElementFactory::make("pipewiresrc")
+        .property("fd", grant.remote_fd.as_raw_fd())
+        .property("path", grant.stream.pipe_wire_node_id().to_string())
+        .property("do-timestamp", true)
+        .property_from_str("on-disconnect", "error")
+        .build()
+        .map_err(|error| gst_error("pipewiresrc construction", error))?;
+    let appsink = attach_rgb_tail(pipeline, &pipewire)?;
+    pipeline
+        .set_state(gst::State::Playing)
+        .map_err(|error| gst_error("pipeline start", error))?;
+    Ok(appsink)
+}
+
+fn attach_rgb_tail(
+    pipeline: &gst::Pipeline,
+    source: &gst::Element,
+) -> Result<gst_app::AppSink, CaptureError> {
+    let queue = gst::ElementFactory::make("queue")
+        .property_from_str("leaky", "downstream")
+        .property("max-size-buffers", 1_u32)
+        .build()
+        .map_err(|error| gst_error("queue construction", error))?;
+    let convert = gst::ElementFactory::make("videoconvert")
+        .build()
+        .map_err(|error| gst_error("videoconvert construction", error))?;
+    let caps = gst::Caps::builder("video/x-raw")
+        .field("format", "RGB")
+        .field("pixel-aspect-ratio", gst::Fraction::new(1, 1))
+        .build();
+    let caps_filter = gst::ElementFactory::make("capsfilter")
+        .property("caps", &caps)
+        .build()
+        .map_err(|error| gst_error("capsfilter construction", error))?;
+    let appsink = latest_frame_appsink();
+
+    pipeline
+        .add_many([source, &queue, &convert, &caps_filter, appsink.upcast_ref()])
+        .map_err(|error| gst_error("pipeline assembly", error))?;
+    gst::Element::link_many([source, &queue, &convert, &caps_filter, appsink.upcast_ref()])
+        .map_err(|error| gst_error("pipeline linking", error))?;
+    Ok(appsink)
 }
 
 async fn shutdown_resources<O: ShutdownOperations>(
@@ -141,6 +144,31 @@ async fn shutdown_resources<O: ShutdownOperations>(
     }
 }
 
+async fn cleanup_failed_setup<O: ShutdownOperations>(
+    primary: CaptureError,
+    operations: &mut O,
+) -> CaptureError {
+    let mut state = ShutdownState::default();
+    match shutdown_resources(operations, &mut state).await {
+        Ok(()) => primary,
+        Err(cleanup) => with_cleanup_failure(primary, cleanup),
+    }
+}
+
+async fn cleanup_grant_after_failure(primary: CaptureError, grant: &PortalGrant) -> CaptureError {
+    match grant.close().await {
+        Ok(()) => primary,
+        Err(cleanup) => with_cleanup_failure(primary, cleanup),
+    }
+}
+
+fn with_cleanup_failure(primary: CaptureError, cleanup: CaptureError) -> CaptureError {
+    CaptureError::Cleanup {
+        primary: Box::new(primary),
+        cleanup: Box::new(cleanup),
+    }
+}
+
 #[allow(deprecated)]
 fn latest_frame_appsink() -> gst_app::AppSink {
     gst_app::AppSink::builder()
@@ -152,17 +180,19 @@ fn latest_frame_appsink() -> gst_app::AppSink {
         .build()
 }
 
-// Portal dimensions are compositor-coordinate hints, not captured-buffer layout.
-// Actual frame dimensions and row layout always come from each negotiated sample.
-fn output_dimensions_hint(size: Option<(i32, i32)>) -> (i32, i32) {
-    const OUTPUT_WIDTH: i32 = 160;
-    let Some((width, height)) = size.filter(|(width, height)| *width > 0 && *height > 0) else {
-        return (OUTPUT_WIDTH, 90);
-    };
-    let scaled_height =
-        (i64::from(height) * i64::from(OUTPUT_WIDTH) + i64::from(width) / 2) / i64::from(width);
-    let scaled_height = i32::try_from(scaled_height).unwrap_or(90).max(1);
-    (OUTPUT_WIDTH, scaled_height)
+pub fn proportional_dimensions(
+    source_width: u32,
+    source_height: u32,
+    target_width: u32,
+) -> Option<(u32, u32)> {
+    if source_width == 0 || source_height == 0 || target_width == 0 {
+        return None;
+    }
+    let numerator = u64::from(source_height)
+        .checked_mul(u64::from(target_width))?
+        .checked_add(u64::from(source_width) / 2)?;
+    let target_height = u32::try_from(numerator / u64::from(source_width)).ok()?;
+    Some((target_width, target_height.max(1)))
 }
 
 impl Drop for GStreamerFrameSource {
@@ -314,9 +344,11 @@ mod tests {
 
     use gst::prelude::*;
     use gstreamer as gst;
-    use gstreamer_video::{VideoFormat, VideoFrameFlags, VideoMeta};
+    use gstreamer_app as gst_app;
+    use gstreamer_video::{VideoFormat, VideoFrameFlags, VideoInfo, VideoMeta};
 
     use super::{CaptureError, frame_from_sample};
+    use crate::RgbFrame;
 
     fn sample(format: &str, bytes: Vec<u8>) -> gst::Sample {
         gst::init().unwrap();
@@ -352,26 +384,68 @@ mod tests {
     }
 
     #[test]
-    fn output_dimensions_preserve_selected_monitor_aspect_ratio() {
-        assert_eq!(super::output_dimensions_hint(Some((1920, 1080))), (160, 90));
-        assert_eq!(super::output_dimensions_hint(Some((3440, 1440))), (160, 67));
+    fn proportional_dimensions_use_actual_portrait_and_ultrawide_caps() {
         assert_eq!(
-            super::output_dimensions_hint(Some((1080, 1920))),
-            (160, 284)
+            super::proportional_dimensions(1080, 1920, 160),
+            Some((160, 284))
         );
+        assert_eq!(
+            super::proportional_dimensions(2100, 900, 160),
+            Some((160, 69))
+        );
+        assert_eq!(super::proportional_dimensions(0, 900, 160), None);
     }
 
     #[test]
-    fn absent_monitor_metadata_uses_safe_output_dimensions() {
-        assert_eq!(super::output_dimensions_hint(None), (160, 90));
+    fn upstream_caps_win_when_portal_metadata_has_a_different_aspect() {
+        gst::init().unwrap();
+        let portal_metadata = (1920, 1080);
+        let upstream_dimensions = (90, 160);
+        assert_ne!(
+            portal_metadata.0 * upstream_dimensions.1,
+            portal_metadata.1 * upstream_dimensions.0
+        );
+
+        let frame = frame_through_rgb_pipeline(upstream_dimensions);
+
+        assert_eq!((frame.width, frame.height), upstream_dimensions);
     }
 
     #[test]
-    fn negotiated_sample_caps_win_over_monitor_metadata() {
-        assert_eq!(super::output_dimensions_hint(Some((1920, 1080))), (160, 90));
-        let frame = frame_from_sample(&sample("RGB", vec![0; 16])).unwrap();
+    fn upstream_caps_preserve_portrait_and_ultrawide_without_portal_metadata() {
+        for dimensions in [(90, 160), (210, 90)] {
+            let frame = frame_through_rgb_pipeline(dimensions);
 
-        assert_eq!((frame.width, frame.height), (2, 2));
+            assert_eq!((frame.width, frame.height), dimensions);
+        }
+    }
+
+    fn frame_through_rgb_pipeline((width, height): (usize, usize)) -> RgbFrame {
+        gst::init().unwrap();
+        let caps = gst::Caps::builder("video/x-raw")
+            .field("format", "RGB")
+            .field("width", i32::try_from(width).unwrap())
+            .field("height", i32::try_from(height).unwrap())
+            .field("framerate", gst::Fraction::new(60, 1))
+            .field("pixel-aspect-ratio", gst::Fraction::new(1, 1))
+            .build();
+        let info = VideoInfo::from_caps(&caps).unwrap();
+        let appsrc = gst_app::AppSrc::builder()
+            .caps(&caps)
+            .format(gst::Format::Time)
+            .build();
+        let pipeline = gst::Pipeline::default();
+        let appsink = super::attach_rgb_tail(&pipeline, appsrc.upcast_ref()).unwrap();
+        pipeline.set_state(gst::State::Playing).unwrap();
+        appsrc
+            .push_buffer(gst::Buffer::from_slice(vec![0; info.size()]))
+            .unwrap();
+        let sample = appsink
+            .try_pull_sample(gst::ClockTime::from_seconds(1))
+            .expect("pipeline should produce one RGB sample");
+        let frame = frame_from_sample(&sample).unwrap();
+        pipeline.set_state(gst::State::Null).unwrap();
+        frame
     }
 
     #[test]
@@ -483,6 +557,23 @@ mod tests {
         assert_eq!(
             (operations.pipeline_stops, operations.portal_closes),
             (2, 1)
+        );
+    }
+
+    #[tokio::test]
+    async fn failed_pipeline_setup_stops_partial_pipeline_and_closes_portal() {
+        let mut operations = FakeShutdownOperations::default();
+        let primary = CaptureError::GStreamer {
+            stage: "injected pipeline setup",
+            message: "failed".to_owned(),
+        };
+
+        let error = super::cleanup_failed_setup(primary, &mut operations).await;
+
+        assert!(matches!(error, CaptureError::GStreamer { .. }));
+        assert_eq!(
+            (operations.pipeline_stops, operations.portal_closes),
+            (1, 1)
         );
     }
 
