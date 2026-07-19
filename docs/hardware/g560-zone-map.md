@@ -5,7 +5,7 @@
 - USB ID: `046d:0a78`
 - Reported device revision: `90.64`
 - USB interfaces 0 and 1 are audio interfaces driven by `snd-usb-audio`.
-- USB interface 2 is a HID interface driven by `usbhid`; lighting reports are sent only after verifying this descriptor class.
+- USB interface 2 is a HID interface driven by `usbhid`; the driver validates that every alternate descriptor for this interface is HID before detaching it.
 
 ## Physical mapping
 
@@ -29,4 +29,4 @@ The verified logical mapping is:
 - logical right front → `0x01`
 - logical right rear → `0x03`
 
-All four pulses completed with uninterrupted audio. An initial unpaced multi-report blackout accepted its first report and rejected its second with a USB I/O error. Persistent control therefore spaces successive reports by 20 ms; it never detaches between reports. A five-minute soak rotated red, green, blue, and white across all four logical zones without a USB error or audio interruption, then returned every zone to black.
+All four pulses completed with uninterrupted audio. An initial unpaced multi-report blackout accepted its first report and rejected its second with a USB I/O error. Persistent control therefore spaces every adjacent report by 20 ms, including reports separated by public API calls; it never detaches between reports. A five-minute soak rotated red, green, blue, and white across all four logical zones without a USB error or audio interruption, then returned every zone to black.

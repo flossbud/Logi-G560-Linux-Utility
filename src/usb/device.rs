@@ -16,6 +16,13 @@ pub enum UsbError {
     MissingInterface(u8),
     #[error("refusing to detach interface {interface}: USB class is 0x{class:02x}, not HID")]
     UnsafeInterface { interface: u8, class: u8 },
+    #[error(
+        "failed to claim interface after detach ({claim}) and failed to reattach it ({reattach})"
+    )]
+    ClaimRecovery {
+        claim: rusb::Error,
+        reattach: rusb::Error,
+    },
     #[error("USB operation failed: {0}")]
     Usb(#[from] rusb::Error),
     #[error("short USB control write: expected {expected} bytes, wrote {actual}")]
@@ -38,33 +45,59 @@ impl LibUsbTransport {
         let handle =
             rusb::open_device_with_vid_pid(0x046d, 0x0a78).ok_or(UsbError::DeviceNotFound)?;
         let descriptor = handle.device().active_config_descriptor()?;
-        let interface_class = descriptor
+        let interface = descriptor
             .interfaces()
             .find(|interface| interface.number() == INTERFACE)
-            .and_then(|interface| interface.descriptors().next())
-            .map(|descriptor| descriptor.class_code())
             .ok_or(UsbError::MissingInterface(INTERFACE))?;
-        if interface_class != rusb::constants::LIBUSB_CLASS_HID {
-            return Err(UsbError::UnsafeInterface {
-                interface: INTERFACE,
-                class: interface_class,
-            });
-        }
+        validate_interface_classes(
+            interface
+                .descriptors()
+                .map(|descriptor| descriptor.class_code()),
+        )?;
         let detached_kernel_driver = handle.kernel_driver_active(INTERFACE)?;
         if detached_kernel_driver {
             handle.detach_kernel_driver(INTERFACE)?;
         }
         if let Err(error) = handle.claim_interface(INTERFACE) {
-            if detached_kernel_driver {
-                let _ = handle.attach_kernel_driver(INTERFACE);
-            }
-            return Err(error.into());
+            return Err(claim_failure_with_recovery(
+                detached_kernel_driver,
+                error,
+                || handle.attach_kernel_driver(INTERFACE),
+            ));
         }
         Ok(Self {
             handle,
             detached_kernel_driver,
         })
     }
+}
+
+fn claim_failure_with_recovery(
+    detached_kernel_driver: bool,
+    claim: rusb::Error,
+    reattach: impl FnOnce() -> Result<(), rusb::Error>,
+) -> UsbError {
+    if detached_kernel_driver && let Err(reattach) = reattach() {
+        return UsbError::ClaimRecovery { claim, reattach };
+    }
+    claim.into()
+}
+
+fn validate_interface_classes(classes: impl IntoIterator<Item = u8>) -> Result<(), UsbError> {
+    let mut found = false;
+    for class in classes {
+        found = true;
+        if class != rusb::constants::LIBUSB_CLASS_HID {
+            return Err(UsbError::UnsafeInterface {
+                interface: INTERFACE,
+                class,
+            });
+        }
+    }
+    if !found {
+        return Err(UsbError::MissingInterface(INTERFACE));
+    }
+    Ok(())
 }
 
 impl Drop for LibUsbTransport {
@@ -112,6 +145,7 @@ pub struct G560<T, D = ThreadDelay> {
     transport: T,
     delay: D,
     previous: Option<ZoneColors>,
+    has_sent_report: bool,
 }
 
 impl<T: UsbTransport> G560<T, ThreadDelay> {
@@ -120,6 +154,7 @@ impl<T: UsbTransport> G560<T, ThreadDelay> {
             transport,
             delay: ThreadDelay,
             previous: None,
+            has_sent_report: false,
         }
     }
 }
@@ -131,6 +166,7 @@ impl<T: UsbTransport, D: ReportDelay> G560<T, D> {
             transport,
             delay,
             previous: None,
+            has_sent_report: false,
         }
     }
 
@@ -155,35 +191,45 @@ impl<T: UsbTransport, D: ReportDelay> G560<T, D> {
         if index > 3 {
             return Err(UsbError::InvalidZoneIndex(index));
         }
-        self.transport.write_report(&encode_solid_index(
-            index,
-            crate::Rgb8 {
-                r: 255,
-                g: 255,
-                b: 255,
-            },
-        ))?;
-        std::thread::sleep(duration);
-        self.transport
-            .write_report(&encode_solid_index(index, crate::Rgb8::BLACK))
+        let result = (|| {
+            self.blackout()?;
+            self.send_report(&encode_solid_index(
+                index,
+                crate::Rgb8 {
+                    r: 255,
+                    g: 255,
+                    b: 255,
+                },
+            ))?;
+            std::thread::sleep(duration);
+            self.blackout()
+        })();
+        if result.is_err() {
+            let _ = self.blackout();
+        }
+        result
     }
 
     fn write_all(&mut self, colors: ZoneColors) -> Result<(), UsbError> {
-        for (position, zone) in [
+        for zone in [
             Zone::LeftRear,
             Zone::LeftFront,
             Zone::RightFront,
             Zone::RightRear,
         ]
         .into_iter()
-        .enumerate()
         {
-            self.transport
-                .write_report(&encode_solid(zone, colors.get(zone)))?;
-            if position < 3 {
-                self.delay.wait(REPORT_DELAY);
-            }
+            self.send_report(&encode_solid(zone, colors.get(zone)))?;
         }
+        Ok(())
+    }
+
+    fn send_report(&mut self, report: &[u8; REPORT_LEN]) -> Result<(), UsbError> {
+        if self.has_sent_report {
+            self.delay.wait(REPORT_DELAY);
+        }
+        self.transport.write_report(report)?;
+        self.has_sent_report = true;
         Ok(())
     }
 }
@@ -259,6 +305,44 @@ mod tests {
     }
 
     #[test]
+    fn two_changed_writes_are_paced_across_the_call_boundary() {
+        let reports = Arc::new(Mutex::new(Vec::new()));
+        let delays = Arc::new(Mutex::new(Vec::new()));
+        let mut device = G560::with_delay(
+            FakeTransport(reports.clone()),
+            RecordingDelay(delays.clone()),
+        );
+
+        device
+            .write(ZoneColors([Rgb8 { r: 1, g: 2, b: 3 }; 4]))
+            .unwrap();
+        device
+            .write(ZoneColors([Rgb8 { r: 4, g: 5, b: 6 }; 4]))
+            .unwrap();
+
+        assert_eq!(reports.lock().unwrap().len(), 8);
+        assert_eq!(*delays.lock().unwrap(), [REPORT_DELAY; 7]);
+    }
+
+    #[test]
+    fn write_then_blackout_is_paced_across_the_call_boundary() {
+        let reports = Arc::new(Mutex::new(Vec::new()));
+        let delays = Arc::new(Mutex::new(Vec::new()));
+        let mut device = G560::with_delay(
+            FakeTransport(reports.clone()),
+            RecordingDelay(delays.clone()),
+        );
+
+        device
+            .write(ZoneColors([Rgb8 { r: 1, g: 2, b: 3 }; 4]))
+            .unwrap();
+        device.blackout().unwrap();
+
+        assert_eq!(reports.lock().unwrap().len(), 8);
+        assert_eq!(*delays.lock().unwrap(), [REPORT_DELAY; 7]);
+    }
+
+    #[test]
     fn blackout_always_emits_four_black_reports() {
         let reports = Arc::new(Mutex::new(Vec::new()));
         let mut device = G560::new(FakeTransport(reports.clone()));
@@ -298,19 +382,90 @@ mod tests {
     }
 
     #[test]
-    fn mapping_pulse_whites_then_blacks_one_raw_index() {
+    fn mapping_pulse_blacks_all_then_whites_one_raw_index_then_blacks_all() {
         let reports = Arc::new(Mutex::new(Vec::new()));
-        let mut device = G560::new(FakeTransport(reports.clone()));
+        let delays = Arc::new(Mutex::new(Vec::new()));
+        let mut device = G560::with_delay(
+            FakeTransport(reports.clone()),
+            RecordingDelay(delays.clone()),
+        );
 
         device
             .pulse_protocol_zone(1, Duration::from_millis(0))
             .unwrap();
 
         let reports = reports.lock().unwrap();
-        assert_eq!(reports.len(), 2);
-        assert_eq!(reports[0][4], 1);
-        assert_eq!(reports[0][6..9], [255, 255, 255]);
-        assert_eq!(reports[1][4], 1);
-        assert_eq!(reports[1][6..9], [0, 0, 0]);
+        assert_eq!(reports.len(), 9);
+        assert!(reports[..4].iter().all(|report| report[6..9] == [0, 0, 0]));
+        assert_eq!(reports[4][4], 1);
+        assert_eq!(reports[4][6..9], [255, 255, 255]);
+        assert!(reports[5..].iter().all(|report| report[6..9] == [0, 0, 0]));
+        assert_eq!(*delays.lock().unwrap(), [REPORT_DELAY; 8]);
+    }
+
+    struct FailOnAttemptTransport {
+        attempts: usize,
+        fail_on: usize,
+        successful: Arc<Mutex<Vec<[u8; REPORT_LEN]>>>,
+    }
+
+    impl UsbTransport for FailOnAttemptTransport {
+        fn write_report(&mut self, report: &[u8; REPORT_LEN]) -> Result<(), UsbError> {
+            self.attempts += 1;
+            if self.attempts == self.fail_on {
+                return Err(UsbError::ShortWrite {
+                    expected: REPORT_LEN,
+                    actual: 0,
+                });
+            }
+            self.successful.lock().unwrap().push(*report);
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn failed_mapping_pulse_attempts_an_all_black_cleanup() {
+        let successful = Arc::new(Mutex::new(Vec::new()));
+        let mut device = G560::with_delay(
+            FailOnAttemptTransport {
+                attempts: 0,
+                fail_on: 5,
+                successful: successful.clone(),
+            },
+            RecordingDelay(Arc::new(Mutex::new(Vec::new()))),
+        );
+
+        assert!(device.pulse_protocol_zone(1, Duration::ZERO).is_err());
+
+        assert_eq!(device.transport.attempts, 9);
+        let reports = successful.lock().unwrap();
+        assert_eq!(reports.len(), 8);
+        assert!(reports.iter().all(|report| report[6..9] == [0, 0, 0]));
+    }
+
+    #[test]
+    fn interface_safety_rejects_a_mixed_alternate_setting() {
+        assert!(validate_interface_classes([rusb::constants::LIBUSB_CLASS_HID]).is_ok());
+        assert!(matches!(
+            validate_interface_classes([rusb::constants::LIBUSB_CLASS_HID, 0x01]),
+            Err(UsbError::UnsafeInterface {
+                interface: INTERFACE,
+                class: 0x01
+            })
+        ));
+    }
+
+    #[test]
+    fn claim_failure_surfaces_a_failed_kernel_driver_reattach() {
+        let error =
+            claim_failure_with_recovery(true, rusb::Error::Busy, || Err(rusb::Error::NotFound));
+
+        assert!(matches!(
+            error,
+            UsbError::ClaimRecovery {
+                claim: rusb::Error::Busy,
+                reattach: rusb::Error::NotFound,
+            }
+        ));
     }
 }
