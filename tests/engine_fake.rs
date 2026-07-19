@@ -45,6 +45,7 @@ struct FakeSink {
     writes: Arc<Mutex<Vec<ZoneColors>>>,
     first_write_started: Arc<Notify>,
     release_first_write: Arc<Notify>,
+    second_write_started: Arc<Notify>,
 }
 
 #[async_trait::async_trait]
@@ -54,6 +55,8 @@ impl LightSink for FakeSink {
         if first {
             self.first_write_started.notify_one();
             self.release_first_write.notified().await;
+        } else {
+            self.second_write_started.notify_one();
         }
         self.writes.lock().await.push(colors);
         Ok(())
@@ -77,6 +80,7 @@ async fn engine_writes_first_newest_and_black() {
     let release_first_write = Arc::new(Notify::new());
     let frames_emitted = Arc::new(Notify::new());
     let cancellation = Arc::new(Notify::new());
+    let second_write_started = Arc::new(Notify::new());
     let source = FakeSource {
         frames: vec![solid(RED), solid(GREEN), solid(BLUE)].into_iter(),
         first_write_started: first_write_started.clone(),
@@ -86,6 +90,7 @@ async fn engine_writes_first_newest_and_black() {
         writes: writes.clone(),
         first_write_started,
         release_first_write: release_first_write.clone(),
+        second_write_started: second_write_started.clone(),
     };
     let regions = [Region {
         x: 0.0,
@@ -102,8 +107,9 @@ async fn engine_writes_first_newest_and_black() {
         cancellation.clone().notified_owned(),
     ));
     frames_emitted.notified().await;
-    cancellation.notify_one();
     release_first_write.notify_one();
+    second_write_started.notified().await;
+    cancellation.notify_one();
     let stats = engine.await.unwrap().unwrap();
 
     assert_eq!(stats.captured_frames, 3);
