@@ -1,4 +1,7 @@
-use std::str::FromStr;
+use std::{
+    str::FromStr,
+    time::{Duration, Instant},
+};
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -25,6 +28,13 @@ enum Command {
         #[arg(long)]
         right_rear: HexColor,
     },
+    /// Hardware verification pulse: all black, one raw zone white, all black.
+    VerifyZone {
+        #[arg(value_parser = clap::value_parser!(u8).range(0..=3))]
+        protocol_index: u8,
+    },
+    /// Five-minute hardware/audio verification with rotating per-zone colors.
+    VerifySoak,
 }
 
 #[derive(Clone)]
@@ -62,6 +72,33 @@ fn main() -> Result<()> {
                 right_front.0,
                 right_rear.0,
             ]))?;
+        }
+        Command::VerifyZone { protocol_index } => {
+            let mut device = G560::new(LibUsbTransport::open()?);
+            device.pulse_protocol_zone(protocol_index, Duration::from_secs(12))?;
+        }
+        Command::VerifySoak => {
+            let mut device = G560::new(LibUsbTransport::open()?);
+            let mut colors = [
+                Rgb8 { r: 255, g: 0, b: 0 },
+                Rgb8 { r: 0, g: 255, b: 0 },
+                Rgb8 { r: 0, g: 0, b: 255 },
+                Rgb8 {
+                    r: 255,
+                    g: 255,
+                    b: 255,
+                },
+            ];
+            let started = Instant::now();
+            while started.elapsed() < Duration::from_secs(300) {
+                if let Err(error) = device.write(ZoneColors(colors)) {
+                    let _ = device.blackout();
+                    return Err(error.into());
+                }
+                colors.rotate_left(1);
+                std::thread::sleep(Duration::from_millis(190));
+            }
+            device.blackout()?;
         }
     }
     Ok(())
