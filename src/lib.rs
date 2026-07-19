@@ -1,3 +1,4 @@
+pub mod capture;
 pub mod color;
 pub mod engine;
 pub mod frame;

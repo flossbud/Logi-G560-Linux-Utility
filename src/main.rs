@@ -6,7 +6,8 @@ use std::{
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use logilightshow::{
-    Rgb8, ZoneColors,
+    FrameSource, Rgb8, ZoneColors,
+    capture::{GStreamerFrameSource, PortalCapture},
     usb::{G560, LibUsbTransport},
 };
 
@@ -35,6 +36,11 @@ enum Command {
     },
     /// Five-minute hardware/audio verification with rotating per-zone colors.
     VerifySoak,
+    /// Capture frames from one portal-authorized monitor without saving images.
+    CaptureTest {
+        #[arg(long, default_value_t = 300, value_parser = clap::value_parser!(u64).range(1..))]
+        frames: u64,
+    },
 }
 
 #[derive(Clone)]
@@ -56,7 +62,8 @@ impl FromStr for HexColor {
     }
 }
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     let Cli { command } = Cli::parse();
     match command {
         Command::SetZones {
@@ -99,6 +106,32 @@ fn main() -> Result<()> {
                 std::thread::sleep(Duration::from_millis(190));
             }
             device.blackout()?;
+        }
+        Command::CaptureTest { frames } => {
+            let grant = PortalCapture::open(None).await?;
+            let permission_is_persistent = grant.restore_token.is_some();
+            let mut source = GStreamerFrameSource::open(grant)?;
+            let started = Instant::now();
+            let mut dimensions = None;
+            for _ in 0..frames {
+                let frame = source
+                    .next_frame()
+                    .await?
+                    .ok_or_else(|| anyhow::anyhow!("capture ended before {frames} frames"))?;
+                dimensions = Some((frame.width, frame.height));
+            }
+            let elapsed = started.elapsed();
+            let (width, height) = dimensions.expect("positive frame count has dimensions");
+            let effective_fps = frames as f64 / elapsed.as_secs_f64();
+            println!(
+                "captured {frames} frames at {width}x{height} in {:.2}s ({effective_fps:.1} fps); persistent permission: {}; saved images: 0",
+                elapsed.as_secs_f64(),
+                if permission_is_persistent {
+                    "yes"
+                } else {
+                    "not returned"
+                }
+            );
         }
     }
     Ok(())
