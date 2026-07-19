@@ -112,16 +112,30 @@ async fn main() -> Result<()> {
             let permission_is_persistent = grant.restore_token.is_some();
             let mut source = GStreamerFrameSource::open(grant)?;
             let started = Instant::now();
-            let mut dimensions = None;
-            for _ in 0..frames {
-                let frame = source
-                    .next_frame()
-                    .await?
-                    .ok_or_else(|| anyhow::anyhow!("capture ended before {frames} frames"))?;
-                dimensions = Some((frame.width, frame.height));
+            let capture_result: Result<(usize, usize)> = async {
+                let mut dimensions = None;
+                for _ in 0..frames {
+                    let frame = source
+                        .next_frame()
+                        .await?
+                        .ok_or_else(|| anyhow::anyhow!("capture ended before {frames} frames"))?;
+                    dimensions = Some((frame.width, frame.height));
+                }
+                Ok(dimensions.expect("positive frame count has dimensions"))
             }
+            .await;
+            let shutdown_result = source.shutdown().await.map_err(anyhow::Error::new);
+            let (width, height) = match (capture_result, shutdown_result) {
+                (Ok(dimensions), Ok(())) => dimensions,
+                (Err(error), Ok(())) => return Err(error),
+                (Ok(_), Err(error)) => return Err(error),
+                (Err(primary), Err(shutdown)) => {
+                    return Err(anyhow::anyhow!(
+                        "{primary:#}; capture shutdown also failed: {shutdown:#}"
+                    ));
+                }
+            };
             let elapsed = started.elapsed();
-            let (width, height) = dimensions.expect("positive frame count has dimensions");
             let effective_fps = frames as f64 / elapsed.as_secs_f64();
             println!(
                 "captured {frames} frames at {width}x{height} in {:.2}s ({effective_fps:.1} fps); persistent permission: {}; saved images: 0",

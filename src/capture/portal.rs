@@ -11,10 +11,16 @@ pub struct PortalGrant {
     pub stream: Stream,
     pub remote_fd: OwnedFd,
     pub restore_token: Option<String>,
-    pub(crate) _session: Session<Screencast>,
+    pub(crate) session: Session<Screencast>,
 }
 
 pub struct PortalCapture;
+
+impl PortalGrant {
+    pub(crate) async fn close(&self) -> Result<(), CaptureError> {
+        self.session.close().await.map_err(portal_error)
+    }
+}
 
 impl PortalCapture {
     pub async fn open(restore_token: Option<String>) -> Result<PortalGrant, CaptureError> {
@@ -57,7 +63,7 @@ impl PortalCapture {
             stream,
             remote_fd,
             restore_token,
-            _session: session,
+            session,
         })
     }
 }

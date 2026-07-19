@@ -8,6 +8,10 @@ use crate::{Region, RgbFrame, SamplerConfig, ZoneColors, latest_channel, sampler
 #[async_trait::async_trait]
 pub trait FrameSource: Send {
     async fn next_frame(&mut self) -> Result<Option<RgbFrame>>;
+
+    async fn shutdown(&mut self) -> Result<()> {
+        Ok(())
+    }
 }
 
 #[async_trait::async_trait]
@@ -72,7 +76,7 @@ where
         let mut captured = 0_u64;
         let mut replacements = 0_u64;
         let mut cancel = capture_cancel;
-        loop {
+        let capture_result: Result<()> = loop {
             let next = tokio::select! {
                 biased;
                 changed = cancel.changed() => {
@@ -98,8 +102,22 @@ where
                     break Err(error);
                 }
             }
+        };
+        let shutdown_result = source
+            .shutdown()
+            .await
+            .context("frame source shutdown failed");
+        if shutdown_result.is_err() {
+            let _ = capture_cancel_sender.send(true);
         }
-        .map(|()| (captured, replacements))
+        match (capture_result, shutdown_result) {
+            (Ok(()), Ok(())) => Ok((captured, replacements)),
+            (Err(error), Ok(())) => Err(error),
+            (Ok(()), Err(error)) => Err(error),
+            (Err(primary), Err(shutdown)) => Err(anyhow!(
+                "{primary:#}; frame source shutdown also failed: {shutdown:#}"
+            )),
+        }
     });
 
     let (update_sender, mut update_receiver) = latest_channel::<SampledUpdate>();
@@ -228,7 +246,10 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{Arc, Condvar, Mutex};
+    use std::sync::{
+        Arc, Condvar, Mutex,
+        atomic::{AtomicUsize, Ordering},
+    };
 
     use tokio::sync::Notify;
 
@@ -254,6 +275,7 @@ mod tests {
         pending_at_end: bool,
         release_after_first: Option<Arc<Notify>>,
         ended: Option<Arc<Notify>>,
+        shutdowns: Option<Arc<AtomicUsize>>,
     }
 
     #[async_trait::async_trait]
@@ -278,6 +300,13 @@ mod tests {
                 ended.notify_one();
             }
             Ok(None)
+        }
+
+        async fn shutdown(&mut self) -> anyhow::Result<()> {
+            if let Some(shutdowns) = &self.shutdowns {
+                shutdowns.fetch_add(1, Ordering::SeqCst);
+            }
+            Ok(())
         }
     }
 
@@ -333,6 +362,7 @@ mod tests {
                 pending_at_end: false,
                 release_after_first: Some(started.clone()),
                 ended: Some(ended.clone()),
+                shutdowns: None,
             },
             RecordingSink {
                 writes,
@@ -378,6 +408,7 @@ mod tests {
                 pending_at_end: true,
                 release_after_first: None,
                 ended: None,
+                shutdowns: None,
             },
             RecordingSink {
                 writes: writes.clone(),
@@ -409,6 +440,7 @@ mod tests {
                 pending_at_end: false,
                 release_after_first: None,
                 ended: None,
+                shutdowns: None,
             },
             RecordingSink {
                 writes: writes.clone(),
@@ -435,6 +467,7 @@ mod tests {
                 pending_at_end: false,
                 release_after_first: None,
                 ended: None,
+                shutdowns: None,
             },
             RecordingSink {
                 writes: writes.clone(),
@@ -465,6 +498,7 @@ mod tests {
                 pending_at_end: false,
                 release_after_first: None,
                 ended: None,
+                shutdowns: None,
             },
             RecordingSink {
                 writes: Arc::new(Mutex::new(Vec::new())),
@@ -478,5 +512,32 @@ mod tests {
         .await;
 
         assert!(result.unwrap_err().to_string().contains("blackout failed"));
+    }
+
+    #[tokio::test]
+    async fn engine_invokes_frame_source_shutdown_on_teardown() {
+        let shutdowns = Arc::new(AtomicUsize::new(0));
+        run_engine_with_sampler(
+            TestSource {
+                frames: Vec::new().into_iter(),
+                error: false,
+                pending_at_end: false,
+                release_after_first: None,
+                ended: None,
+                shutdowns: Some(shutdowns.clone()),
+            },
+            RecordingSink {
+                writes: Arc::new(Mutex::new(Vec::new())),
+                fail_blackout: false,
+            },
+            regions(),
+            SamplerConfig::default(),
+            std::future::pending(),
+            |_, _, _| ZoneColors::BLACK,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(shutdowns.load(Ordering::SeqCst), 1);
     }
 }

@@ -12,8 +12,6 @@ pub enum CaptureError {
     Portal { message: String },
     #[error("screen capture portal returned {count} streams; expected exactly one monitor")]
     UnexpectedStreamCount { count: usize },
-    #[error("selected monitor did not report valid dimensions: {size:?}")]
-    InvalidMonitorSize { size: Option<(i32, i32)> },
     #[error("GStreamer {stage} failed: {message}")]
     GStreamer {
         stage: &'static str,
@@ -33,4 +31,6 @@ pub enum CaptureError {
         message: String,
         debug: String,
     },
+    #[error("capture shutdown failed: {message}")]
+    Shutdown { message: String },
 }
