@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex};
+use std::sync::mpsc::{self, SyncSender};
 use std::time::Duration;
 
 use crate::{LightSink, Zone, ZoneColors, engine::LightUpdateStatus};
@@ -178,13 +178,49 @@ pub struct G560<T, D = ThreadDelay> {
 /// executed on Tokio's bounded blocking pool and therefore cannot stall the
 /// async capture/recovery tasks.
 pub struct AsyncG560<T, D = ThreadDelay> {
-    inner: Arc<Mutex<G560<T, D>>>,
+    tx: SyncSender<UsbCommand>,
+    _marker: std::marker::PhantomData<(T, D)>,
 }
 
-impl<T, D> AsyncG560<T, D> {
+enum UsbCommand {
+    Write(
+        ZoneColors,
+        tokio::sync::oneshot::Sender<anyhow::Result<LightUpdateStatus>>,
+    ),
+    Blackout(tokio::sync::oneshot::Sender<anyhow::Result<()>>),
+}
+
+impl<T: UsbTransport + 'static, D: ReportDelay + Send + 'static> AsyncG560<T, D> {
     pub fn new(device: G560<T, D>) -> Self {
+        let (tx, rx) = mpsc::sync_channel(32);
+        std::thread::spawn(move || {
+            let mut device = device;
+            while let Ok(cmd) = rx.recv() {
+                match cmd {
+                    UsbCommand::Write(c, r) => {
+                        let changed = device.previous != Some(c);
+                        let _ = r.send(
+                            device
+                                .write(c)
+                                .map(|_| {
+                                    if changed {
+                                        LightUpdateStatus::Rendered
+                                    } else {
+                                        LightUpdateStatus::Unchanged
+                                    }
+                                })
+                                .map_err(anyhow::Error::from),
+                        );
+                    }
+                    UsbCommand::Blackout(r) => {
+                        let _ = r.send(device.blackout().map_err(anyhow::Error::from));
+                    }
+                }
+            }
+        });
         Self {
-            inner: Arc::new(Mutex::new(device)),
+            tx,
+            _marker: std::marker::PhantomData,
         }
     }
 }
@@ -413,28 +449,18 @@ where
     D: ReportDelay + Send + 'static,
 {
     async fn write(&mut self, colors: ZoneColors) -> anyhow::Result<()> {
-        let inner = Arc::clone(&self.inner);
-        tokio::task::spawn_blocking(move || {
-            inner
-                .lock()
-                .map_err(|_| anyhow::anyhow!("USB lock poisoned"))?
-                .write(colors)
-                .map_err(anyhow::Error::from)
-        })
-        .await??;
+        let (s, r) = tokio::sync::oneshot::channel();
+        let tx = self.tx.clone();
+        tokio::task::spawn_blocking(move || tx.send(UsbCommand::Write(colors, s))).await??;
+        r.await??;
         Ok(())
     }
 
     async fn blackout(&mut self) -> anyhow::Result<()> {
-        let inner = Arc::clone(&self.inner);
-        tokio::task::spawn_blocking(move || {
-            inner
-                .lock()
-                .map_err(|_| anyhow::anyhow!("USB lock poisoned"))?
-                .blackout()
-                .map_err(anyhow::Error::from)
-        })
-        .await??;
+        let (s, r) = tokio::sync::oneshot::channel();
+        let tx = self.tx.clone();
+        tokio::task::spawn_blocking(move || tx.send(UsbCommand::Blackout(s))).await??;
+        r.await??;
         Ok(())
     }
 
@@ -443,20 +469,10 @@ where
         colors: ZoneColors,
         _captured_at: std::time::Instant,
     ) -> anyhow::Result<LightUpdateStatus> {
-        let inner = Arc::clone(&self.inner);
-        tokio::task::spawn_blocking(move || {
-            let mut guard = inner
-                .lock()
-                .map_err(|_| anyhow::anyhow!("USB lock poisoned"))?;
-            let changed = guard.previous != Some(colors);
-            guard.write(colors)?;
-            Ok::<_, anyhow::Error>(if changed {
-                LightUpdateStatus::Rendered
-            } else {
-                LightUpdateStatus::Unchanged
-            })
-        })
-        .await?
+        let (s, r) = tokio::sync::oneshot::channel();
+        let tx = self.tx.clone();
+        tokio::task::spawn_blocking(move || tx.send(UsbCommand::Write(colors, s))).await??;
+        r.await?
     }
 }
 
