@@ -462,7 +462,6 @@ where
     D: ReportDelay + Send + 'static,
 {
     async fn write(&mut self, colors: ZoneColors) -> anyhow::Result<()> {
-        self.safety.store(true, Ordering::Release);
         let (s, r) = tokio::sync::oneshot::channel();
         let tx = self.tx.clone();
         tokio::task::spawn_blocking(move || tx.send(UsbCommand::Write(colors, s))).await??;
@@ -471,6 +470,7 @@ where
     }
 
     async fn blackout(&mut self) -> anyhow::Result<()> {
+        self.safety.store(true, Ordering::Release);
         let (s, r) = tokio::sync::oneshot::channel();
         let tx = self.tx.clone();
         tokio::task::spawn_blocking(move || tx.send(UsbCommand::Blackout(s))).await??;
