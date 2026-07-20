@@ -1,3 +1,4 @@
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use crate::{LightSink, Zone, ZoneColors, engine::LightUpdateStatus};
@@ -170,6 +171,22 @@ pub struct G560<T, D = ThreadDelay> {
     report_delay: Duration,
     previous: Option<ZoneColors>,
     has_sent_report: bool,
+}
+
+/// Adapter that keeps synchronous USB I/O off Tokio worker threads.
+/// A single mutex preserves report ordering and ownership; each operation is
+/// executed on Tokio's bounded blocking pool and therefore cannot stall the
+/// async capture/recovery tasks.
+pub struct AsyncG560<T, D = ThreadDelay> {
+    inner: Arc<Mutex<G560<T, D>>>,
+}
+
+impl<T, D> AsyncG560<T, D> {
+    pub fn new(device: G560<T, D>) -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(device)),
+        }
+    }
 }
 
 impl<T: UsbTransport> G560<T, ThreadDelay> {
@@ -389,12 +406,93 @@ impl<T: UsbTransport, D: ReportDelay + Send> LightSink for G560<T, D> {
     }
 }
 
+#[async_trait::async_trait]
+impl<T, D> LightSink for AsyncG560<T, D>
+where
+    T: UsbTransport + 'static,
+    D: ReportDelay + Send + 'static,
+{
+    async fn write(&mut self, colors: ZoneColors) -> anyhow::Result<()> {
+        let inner = Arc::clone(&self.inner);
+        tokio::task::spawn_blocking(move || {
+            inner
+                .lock()
+                .map_err(|_| anyhow::anyhow!("USB lock poisoned"))?
+                .write(colors)
+                .map_err(anyhow::Error::from)
+        })
+        .await??;
+        Ok(())
+    }
+
+    async fn blackout(&mut self) -> anyhow::Result<()> {
+        let inner = Arc::clone(&self.inner);
+        tokio::task::spawn_blocking(move || {
+            inner
+                .lock()
+                .map_err(|_| anyhow::anyhow!("USB lock poisoned"))?
+                .blackout()
+                .map_err(anyhow::Error::from)
+        })
+        .await??;
+        Ok(())
+    }
+
+    async fn write_update(
+        &mut self,
+        colors: ZoneColors,
+        _captured_at: std::time::Instant,
+    ) -> anyhow::Result<LightUpdateStatus> {
+        let inner = Arc::clone(&self.inner);
+        tokio::task::spawn_blocking(move || {
+            let mut guard = inner
+                .lock()
+                .map_err(|_| anyhow::anyhow!("USB lock poisoned"))?;
+            let changed = guard.previous != Some(colors);
+            guard.write(colors)?;
+            Ok::<_, anyhow::Error>(if changed {
+                LightUpdateStatus::Rendered
+            } else {
+                LightUpdateStatus::Unchanged
+            })
+        })
+        .await?
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::{Arc, Mutex};
 
     use super::*;
     use crate::Rgb8;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn async_adapter_does_not_block_async_worker() {
+        struct Blocking;
+        impl UsbTransport for Blocking {
+            fn write_report(&mut self, _report: &[u8; REPORT_LEN]) -> Result<(), UsbError> {
+                std::thread::sleep(Duration::from_millis(80));
+                Ok(())
+            }
+        }
+        let mut sink = AsyncG560::new(G560::new(Blocking));
+        let started = std::time::Instant::now();
+        let write = sink.write(ZoneColors(
+            [Rgb8 {
+                r: 255,
+                g: 255,
+                b: 255,
+            }; 4],
+        ));
+        tokio::pin!(write);
+        tokio::select! {
+            result = &mut write => result.unwrap(),
+            _ = tokio::time::sleep(Duration::from_millis(10)) => {
+                assert!(started.elapsed() < Duration::from_millis(40));
+            }
+        }
+    }
 
     struct FakeTransport(Arc<Mutex<Vec<[u8; REPORT_LEN]>>>);
 

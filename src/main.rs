@@ -16,7 +16,7 @@ use logilightshow::{
     ZoneLayout,
     capture::{CaptureError, GStreamerFrameSource, PortalCapture},
     run_engine_with_metrics,
-    usb::{G560, LibUsbTransport},
+    usb::{AsyncG560, G560, LibUsbTransport},
 };
 use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
@@ -222,10 +222,10 @@ async fn run_live() -> Result<()> {
             signal_cancellation.cancel();
         }
     });
-    let factory = || -> Result<G560<LibUsbTransport>> {
+    let factory = || -> Result<AsyncG560<LibUsbTransport>> {
         let mut device = G560::new(LibUsbTransport::open()?);
         device.blackout()?;
-        Ok(device)
+        Ok(AsyncG560::new(device))
     };
     let mut sink = RecoveringLightSink::new(factory, cancellation.clone());
     let recovery_metrics = sink.metrics();
