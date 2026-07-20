@@ -1,4 +1,5 @@
 use std::{
+    array,
     future::Future,
     sync::{
         Arc, Mutex,
@@ -12,8 +13,8 @@ use tokio::sync::{mpsc, oneshot, watch};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    DEFAULT_TRANSITION_DURATION, LatestReceiver, RgbFrame, SamplerConfig, TransitionController,
-    ZoneColors, ZoneLayout, ZoneMasks, latest_channel, sampler::sample_zones,
+    DEFAULT_TRANSITION_DURATION, LatestReceiver, Rgb8, RgbFrame, SamplerConfig,
+    TransitionController, ZoneColors, ZoneLayout, ZoneMasks, latest_channel, sampler::sample_zones,
 };
 
 #[async_trait::async_trait]
@@ -64,6 +65,7 @@ const INITIAL_RETRY_DELAY: Duration = Duration::from_millis(250);
 const MAX_RETRY_DELAY: Duration = Duration::from_secs(5);
 const MAX_CONSECUTIVE_WRITE_FAILURES: usize = 3;
 const LIGHT_UPDATE_INTERVAL: Duration = Duration::from_millis(20);
+const NORMAL_FADE_TO_BLACK_DURATION: Duration = Duration::from_millis(200);
 const SAFETY_BLACKOUT_TIMEOUT: Duration = Duration::from_secs(1);
 
 #[derive(Debug, thiserror::Error)]
@@ -552,7 +554,11 @@ impl LightingWriterState {
         }
         let dropped_unrendered = self.current_update.is_some() && !self.current_update_rendered;
         self.transition = TransitionController::new(self.displayed, DEFAULT_TRANSITION_DURATION);
-        self.transition.retarget(update.colors, now.into_std());
+        self.transition.retarget_with_zone_durations(
+            update.colors,
+            now.into_std(),
+            normal_transition_durations(self.displayed, update.colors),
+        );
         self.current_update = Some(update);
         self.current_update_rendered = false;
         self.transition_active = true;
@@ -586,6 +592,16 @@ impl LightingWriterState {
         self.next_write = None;
         dropped_unrendered
     }
+}
+
+fn normal_transition_durations(displayed: ZoneColors, target: ZoneColors) -> [Duration; 4] {
+    array::from_fn(|index| {
+        if displayed.0[index] != Rgb8::BLACK && target.0[index] == Rgb8::BLACK {
+            NORMAL_FADE_TO_BLACK_DURATION
+        } else {
+            DEFAULT_TRANSITION_DURATION
+        }
+    })
 }
 
 async fn request_safety_blackout(
@@ -1256,6 +1272,36 @@ mod tests {
             state
                 .transition
                 .colors_at((now + Duration::from_millis(90)).into_std()),
+            target
+        );
+    }
+
+    #[test]
+    fn normal_black_targets_fade_longer_per_zone() {
+        let now = tokio::time::Instant::now();
+        let visible = Rgb8 { r: 80, g: 20, b: 5 };
+        let blue = Rgb8 { r: 0, g: 0, b: 120 };
+        let mut state = LightingWriterState::new();
+        state.displayed = ZoneColors([visible; 4]);
+        let target = ZoneColors([Rgb8::BLACK, blue, Rgb8::BLACK, blue]);
+        let update = SampledUpdate {
+            captured_at: Instant::now(),
+            colors: target,
+            capture_generation: 0,
+        };
+
+        assert_eq!(state.accept_update(update, now, true), Some(false));
+        let at_ninety = state
+            .transition
+            .colors_at((now + Duration::from_millis(90)).into_std());
+        assert_ne!(at_ninety.0[0], Rgb8::BLACK);
+        assert_eq!(at_ninety.0[1], blue);
+        assert_ne!(at_ninety.0[2], Rgb8::BLACK);
+        assert_eq!(at_ninety.0[3], blue);
+        assert_eq!(
+            state
+                .transition
+                .colors_at((now + Duration::from_millis(200)).into_std()),
             target
         );
     }

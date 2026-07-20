@@ -4,6 +4,7 @@ use std::{
         Arc, Mutex,
         atomic::{AtomicU64, Ordering},
     },
+    time::{Duration, Instant},
 };
 
 use gstreamer::{self as gst, prelude::*};
@@ -13,10 +14,13 @@ use gstreamer_video::{VideoFormat, VideoFrameExt, VideoFrameRef, VideoInfo};
 use super::{CaptureError, portal::PortalGrant};
 use crate::{FrameSource, RgbFrame};
 
+const STATIC_FRAME_HOLD_INTERVAL: Duration = Duration::from_millis(200);
+
 pub struct GStreamerFrameSource {
     resources: CaptureResources,
     appsink: gst_app::AppSink,
     expected_dimensions: Arc<AtomicU64>,
+    last_frame: Option<RgbFrame>,
     shutdown: ShutdownState,
 }
 
@@ -180,6 +184,7 @@ impl GStreamerFrameSource {
             resources: CaptureResources { pipeline, grant },
             appsink: tail.appsink,
             expected_dimensions: tail.expected_dimensions,
+            last_frame: None,
             shutdown: ShutdownState::default(),
         })
     }
@@ -194,10 +199,20 @@ fn build_pipeline(pipeline: &gst::Pipeline, grant: &PortalGrant) -> Result<RgbTa
         .property("fd", grant.remote_fd.as_raw_fd())
         .property("path", grant.stream.pipe_wire_node_id().to_string())
         .property("do-timestamp", true)
-        .property_from_str("on-disconnect", "error")
         .build()
         .map_err(|error| gst_error("pipewiresrc construction", error))?;
-    let appsink = attach_rgb_tail_with_direct_scanout(pipeline, &pipewire, true)?;
+    // Some PipeWire plugin builds (including Bazzite/Fedora 43) do not expose
+    // this newer property. Those builds still report capture loss through EOS,
+    // which the engine handles with the same blackout/cleanup path.
+    if pipewire.find_property("on-disconnect").is_some() {
+        pipewire.set_property_from_str("on-disconnect", "error");
+    }
+    // Bazzite's current Mesa/GStreamer stack negotiates the GL bridge but
+    // downloads completely black frames. System-memory PipeWire buffers are
+    // reliable there and also keep GNOME compositing while capture is active.
+    // Retain the Fedora-tested bridge as an explicit compatibility option.
+    let require_dmabuf = std::env::var_os("LOGILIGHTSHOW_ENABLE_DMABUF").is_some();
+    let appsink = attach_rgb_tail_with_direct_scanout(pipeline, &pipewire, require_dmabuf)?;
     pipeline
         .set_state(gst::State::Playing)
         .map_err(|error| gst_error("pipeline start", error))?;
@@ -229,7 +244,9 @@ struct DirectScanoutBridge {
     rate_limit: gst::Element,
     rate_filter: gst::Element,
     upload: gst::Element,
+    upload_filter: gst::Element,
     color_convert: gst::Element,
+    gl_output_filter: gst::Element,
     download: gst::Element,
     output_filter: gst::Element,
 }
@@ -251,6 +268,22 @@ fn direct_scanout_bridge() -> Result<DirectScanoutBridge, CaptureError> {
         .property("caps", output_caps)
         .build()
         .map_err(|error| gst_error("system-memory capsfilter construction", error))?;
+    let gl_output_caps = gst::Caps::builder("video/x-raw")
+        .features(["memory:GLMemory"])
+        .field("format", "RGBA")
+        .field("texture-target", "2D")
+        .build();
+    let gl_output_filter = gst::ElementFactory::make("capsfilter")
+        .property("caps", gl_output_caps)
+        .build()
+        .map_err(|error| gst_error("GL-memory capsfilter construction", error))?;
+    let upload_caps = gst::Caps::builder("video/x-raw")
+        .features(["memory:GLMemory"])
+        .build();
+    let upload_filter = gst::ElementFactory::make("capsfilter")
+        .property("caps", upload_caps)
+        .build()
+        .map_err(|error| gst_error("GL-upload capsfilter construction", error))?;
     let rate_caps = gst::Caps::builder("video/x-raw")
         .features(["memory:DMABuf"])
         .field("format", "DMA_DRM")
@@ -275,7 +308,9 @@ fn direct_scanout_bridge() -> Result<DirectScanoutBridge, CaptureError> {
             .build()
             .map_err(|error| gst_error("DMA-BUF rate capsfilter construction", error))?,
         upload: make("glupload", "GL upload construction")?,
+        upload_filter,
         color_convert: make("glcolorconvert", "GL color conversion construction")?,
+        gl_output_filter,
         download: make("gldownload", "GL download construction")?,
         output_filter,
     })
@@ -287,6 +322,15 @@ fn attach_rgb_tail_with_direct_scanout(
     require_dmabuf: bool,
 ) -> Result<RgbTail, CaptureError> {
     let direct_scanout = require_dmabuf.then(direct_scanout_bridge).transpose()?;
+    let system_memory_pacer = direct_scanout
+        .is_none()
+        .then(|| {
+            gst::ElementFactory::make("identity")
+                .property("sleep-time", 50_000_u32)
+                .build()
+        })
+        .transpose()
+        .map_err(|error| gst_error("system-memory wall-clock pacer construction", error))?;
     let queue = gst::ElementFactory::make("queue")
         .property_from_str("leaky", "downstream")
         .property("max-size-buffers", 1_u32)
@@ -323,25 +367,28 @@ fn attach_rgb_tail_with_direct_scanout(
                 &bridge.rate_limit,
                 &bridge.rate_filter,
                 &bridge.upload,
+                &bridge.upload_filter,
                 &bridge.color_convert,
+                &bridge.gl_output_filter,
                 &bridge.download,
                 &bridge.output_filter,
             ])
+            .map_err(|error| gst_error("pipeline assembly", error))?;
+    }
+    if let Some(pacer) = &system_memory_pacer {
+        pipeline
+            .add(pacer)
             .map_err(|error| gst_error("pipeline assembly", error))?;
     }
     pipeline
         .add_many([&queue, &convert, &scale, &caps_filter, appsink.upcast_ref()])
         .map_err(|error| gst_error("pipeline assembly", error))?;
     if let Some(bridge) = &direct_scanout {
+        // Link the GL bridge from downstream to upstream. GStreamer 1.26 can
+        // otherwise propagate the DMA-BUF input caps through glupload before
+        // its GLMemory output has been constrained, making a valid bridge
+        // appear unlinkable during construction.
         gst::Element::link_many([
-            source,
-            &bridge.input_filter,
-            &queue,
-            &bridge.wall_clock_pacer,
-            &bridge.rate_limit,
-            &bridge.rate_filter,
-            &bridge.upload,
-            &bridge.color_convert,
             &bridge.download,
             &bridge.output_filter,
             &convert,
@@ -350,10 +397,32 @@ fn attach_rgb_tail_with_direct_scanout(
             appsink.upcast_ref(),
         ])
         .map_err(|error| gst_error("pipeline DMA-BUF bridge linking", error))?;
+        gst::Element::link_many([
+            &bridge.color_convert,
+            &bridge.gl_output_filter,
+            &bridge.download,
+        ])
+        .map_err(|error| gst_error("pipeline DMA-BUF bridge linking", error))?;
+        gst::Element::link_many([&bridge.upload, &bridge.upload_filter, &bridge.color_convert])
+            .map_err(|error| gst_error("pipeline DMA-BUF bridge linking", error))?;
+        gst::Element::link_many([
+            source,
+            &bridge.input_filter,
+            &queue,
+            &bridge.wall_clock_pacer,
+            &bridge.rate_limit,
+            &bridge.rate_filter,
+            &bridge.upload,
+        ])
+        .map_err(|error| gst_error("pipeline DMA-BUF bridge linking", error))?;
     } else {
+        let pacer = system_memory_pacer
+            .as_ref()
+            .expect("system-memory capture has a wall-clock pacer");
         gst::Element::link_many([
             source,
             &queue,
+            pacer,
             &convert,
             &scale,
             &caps_filter,
@@ -522,7 +591,14 @@ impl FrameSource for GStreamerFrameSource {
                 stage: "bus lookup",
                 message: "pipeline has no bus".to_owned(),
             })?;
-        match next_frame_from_sink(&self.appsink, &bus, &self.expected_dimensions).await {
+        let next = next_frame_from_sink(
+            &self.appsink,
+            &bus,
+            &self.expected_dimensions,
+            &mut self.last_frame,
+        )
+        .await;
+        match next {
             Ok(frame) => Ok(Some(frame)),
             Err(CaptureError::EndOfStream) => Ok(None),
             Err(error) => Err(error.into()),
@@ -540,22 +616,47 @@ async fn next_frame_from_sink(
     appsink: &gst_app::AppSink,
     bus: &gst::Bus,
     expected_dimensions: &Arc<AtomicU64>,
+    last_frame: &mut Option<RgbFrame>,
 ) -> Result<RgbFrame, CaptureError> {
+    let waiting_since = Instant::now();
     loop {
         let appsink = appsink.clone();
         let bus = bus.clone();
-        let expected_dimensions = expected_dimensions.clone();
-        let frame =
-            tokio::task::spawn_blocking(move || poll_frame(&appsink, &bus, &expected_dimensions))
-                .await
-                .map_err(|error| CaptureError::GStreamer {
-                    stage: "sample polling task",
-                    message: error.to_string(),
-                })??;
+        let poll_expected_dimensions = expected_dimensions.clone();
+        let frame = tokio::task::spawn_blocking(move || {
+            poll_frame(&appsink, &bus, &poll_expected_dimensions)
+        })
+        .await
+        .map_err(|error| CaptureError::GStreamer {
+            stage: "sample polling task",
+            message: error.to_string(),
+        })??;
         if let Some(frame) = frame {
+            *last_frame = Some(frame.clone());
             return Ok(frame);
         }
+        if waiting_since.elapsed() >= STATIC_FRAME_HOLD_INTERVAL {
+            // GNOME's screencast source is damage-driven and can legitimately
+            // stop delivering buffers while the monitor is static. Keep the
+            // latest valid frame alive below the engine's 500 ms safety limit,
+            // without racing or duplicating the normal ~20 FPS stream. Bus
+            // errors and EOS are checked inside poll_frame first.
+            if let Some(frame) = held_frame(last_frame, expected_dimensions) {
+                return Ok(frame);
+            }
+        }
     }
+}
+
+fn held_frame(
+    last_frame: &Option<RgbFrame>,
+    expected_dimensions: &Arc<AtomicU64>,
+) -> Option<RgbFrame> {
+    let frame = last_frame.as_ref()?;
+    let width = u32::try_from(frame.width).ok()?;
+    let height = u32::try_from(frame.height).ok()?;
+    let expected = expected_dimensions.load(Ordering::Acquire);
+    (expected != 0 && pack_dimensions((width, height)) == expected).then(|| frame.clone())
 }
 
 fn poll_frame(
@@ -1080,16 +1181,79 @@ mod tests {
             gst::message::Error::builder(gst::CoreError::Failed, "fake pipeline failure").build(),
         )
         .unwrap();
+        let mut last_frame = None;
 
         let error = tokio::time::timeout(
             Duration::from_millis(250),
-            super::next_frame_from_sink(&appsink, &bus, &Arc::new(AtomicU64::new(0))),
+            super::next_frame_from_sink(
+                &appsink,
+                &bus,
+                &Arc::new(AtomicU64::new(0)),
+                &mut last_frame,
+            ),
         )
         .await
         .expect("bus errors must not wait indefinitely")
         .unwrap_err();
 
         assert!(matches!(error, CaptureError::Pipeline { .. }));
+    }
+
+    #[tokio::test]
+    async fn healthy_static_pipeline_repeats_its_last_valid_frame() {
+        let (pipeline, appsrc, tail) = scaled_rgb_pipeline();
+        pipeline.set_state(gst::State::Playing).unwrap();
+        push_source_frame(&appsrc, (160, 90));
+        let bus = pipeline.bus().unwrap();
+        let mut last_frame = None;
+
+        let first = tokio::time::timeout(
+            Duration::from_millis(500),
+            super::next_frame_from_sink(
+                &tail.appsink,
+                &bus,
+                &tail.expected_dimensions,
+                &mut last_frame,
+            ),
+        )
+        .await
+        .expect("the initial source frame should arrive")
+        .unwrap();
+        let repeat_started = std::time::Instant::now();
+        let repeated = tokio::time::timeout(
+            Duration::from_millis(400),
+            super::next_frame_from_sink(
+                &tail.appsink,
+                &bus,
+                &tail.expected_dimensions,
+                &mut last_frame,
+            ),
+        )
+        .await
+        .expect("a connected static source should repeat before the stall timeout")
+        .unwrap();
+
+        pipeline.set_state(gst::State::Null).unwrap();
+        assert_eq!(repeated, first);
+        assert!(
+            repeat_started.elapsed() >= super::STATIC_FRAME_HOLD_INTERVAL,
+            "a held frame must not race the normal capture cadence"
+        );
+    }
+
+    #[test]
+    fn held_frame_is_blocked_during_caps_renegotiation() {
+        let frame = RgbFrame::new(160, 90, 480, vec![0; 160 * 90 * 3]).unwrap();
+        let expected = Arc::new(AtomicU64::new(0));
+
+        assert!(super::held_frame(&Some(frame.clone()), &expected).is_none());
+        expected.store(super::pack_dimensions((160, 69)), Ordering::Release);
+        assert!(super::held_frame(&Some(frame.clone()), &expected).is_none());
+        expected.store(super::pack_dimensions((160, 90)), Ordering::Release);
+        assert_eq!(
+            super::held_frame(&Some(frame.clone()), &expected),
+            Some(frame)
+        );
     }
 
     #[derive(Default)]

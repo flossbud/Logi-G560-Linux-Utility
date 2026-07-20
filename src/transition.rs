@@ -12,7 +12,7 @@ pub struct TransitionController {
     start: ZoneColors,
     target: ZoneColors,
     started_at: Option<Instant>,
-    duration: Duration,
+    durations: [Duration; 4],
 }
 
 impl TransitionController {
@@ -21,14 +21,24 @@ impl TransitionController {
             start: initial,
             target: initial,
             started_at: None,
-            duration,
+            durations: [duration; 4],
         }
     }
 
     pub fn retarget(&mut self, target: ZoneColors, now: Instant) {
+        self.retarget_with_zone_durations(target, now, self.durations);
+    }
+
+    pub fn retarget_with_zone_durations(
+        &mut self,
+        target: ZoneColors,
+        now: Instant,
+        durations: [Duration; 4],
+    ) {
         self.start = self.colors_at(now);
         self.target = target;
         self.started_at = Some(now);
+        self.durations = durations;
     }
 
     pub fn colors_at(&self, now: Instant) -> ZoneColors {
@@ -37,23 +47,22 @@ impl TransitionController {
         };
         let elapsed = now.saturating_duration_since(started_at);
 
-        if elapsed.is_zero() && !self.duration.is_zero() {
-            return self.start;
-        }
-        if elapsed >= self.duration {
-            return self.target;
-        }
-
-        let time = elapsed.as_secs_f32() / self.duration.as_secs_f32();
-        let progress = time * time * (3.0 - 2.0 * time);
         ZoneColors(array::from_fn(|index| {
+            let duration = self.durations[index];
+            if elapsed >= duration {
+                return self.target.0[index];
+            }
+            let time = elapsed.as_secs_f32() / duration.as_secs_f32();
+            let progress = time * time * (3.0 - 2.0 * time);
             interpolate_oklab(self.start.0[index], self.target.0[index], progress)
         }))
     }
 
     pub fn is_complete(&self, now: Instant) -> bool {
-        self.started_at
-            .is_none_or(|started_at| now.saturating_duration_since(started_at) >= self.duration)
+        self.started_at.is_none_or(|started_at| {
+            let elapsed = now.saturating_duration_since(started_at);
+            self.durations.iter().all(|duration| elapsed >= *duration)
+        })
     }
 }
 
@@ -162,6 +171,31 @@ mod tests {
         assert_eq!(
             transition.colors_at(interruption + Duration::from_millis(90)),
             BLUE_ZONES
+        );
+    }
+
+    #[test]
+    fn zone_specific_durations_finish_independently() {
+        let start = Instant::now();
+        let mut transition = TransitionController::new(RED_ZONES, Duration::from_millis(90));
+        transition.retarget_with_zone_durations(
+            ZoneColors([Rgb8::BLACK, BLUE, BLUE, BLUE]),
+            start,
+            [
+                Duration::from_millis(200),
+                Duration::from_millis(90),
+                Duration::from_millis(90),
+                Duration::from_millis(90),
+            ],
+        );
+
+        let at_ninety = transition.colors_at(start + Duration::from_millis(90));
+        assert_ne!(at_ninety.0[0], Rgb8::BLACK);
+        assert_eq!(&at_ninety.0[1..], &[BLUE, BLUE, BLUE]);
+        assert!(!transition.is_complete(start + Duration::from_millis(90)));
+        assert_eq!(
+            transition.colors_at(start + Duration::from_millis(200)),
+            ZoneColors([Rgb8::BLACK, BLUE, BLUE, BLUE])
         );
     }
 

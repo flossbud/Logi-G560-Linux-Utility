@@ -13,9 +13,10 @@ directories = "6"
 futures-util = "0.3"
 gstreamer = "0.25"
 gstreamer-app = "0.25"
-gstreamer-video = "0.25"
+gstreamer-video = { version = "0.25", features = ["v1_24"] }
 hdrhistogram = "7.5"
 palette = "0.7"
+pipewire = { version = "0.10", features = ["v1_2_0"] }
 rusb = "0.9.4"
 serde = { version = "1.0", features = ["derive"] }
 thiserror = "2.0"

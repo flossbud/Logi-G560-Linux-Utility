@@ -1,0 +1,16 @@
+[Unit]
+Description=LogiLightShow ambient lighting for Bazzite Gaming Mode
+Documentation=file:%h/Documents/LogiLightShow/HANDOFF_BAZZITE.md
+After=pipewire.service gamescope-session-plus@steam.service
+PartOf=gamescope-session-plus@steam.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+ExecStart=%h/Documents/LogiLightShow/target/release/logilightshow run-gaming
+Restart=on-failure
+RestartSec=2s
+TimeoutStopSec=10s
+
+[Install]
+WantedBy=gamescope-session-plus@steam.service

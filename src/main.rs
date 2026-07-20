@@ -13,9 +13,9 @@ use directories::BaseDirs;
 use logilightshow::{
     CaptureRecoverySnapshot, EngineMetrics, EngineSnapshot, FrameSource, FrameSourceFactory,
     LightSink, RecoveringFrameSource, RecoveringLightSink, Rgb8, SamplerConfig, ZoneColors,
-    ZoneLayout,
-    capture::{CaptureError, GStreamerFrameSource, PortalCapture},
-    run_engine_with_metrics,
+    ZoneLayout, ZoneMasks,
+    capture::{CaptureError, GStreamerFrameSource, GamescopeFrameSource, PortalCapture},
+    run_engine_with_metrics, sample_zones,
     usb::{AsyncG560, G560, LibUsbTransport},
 };
 use serde::{Deserialize, Serialize};
@@ -57,9 +57,17 @@ enum Command {
     CaptureTest {
         #[arg(long, default_value_t = 300, value_parser = clap::value_parser!(u64).range(1..))]
         frames: u64,
+        /// Reuse the monitor permission saved by `run` instead of opening a chooser.
+        #[arg(long)]
+        saved_permission: bool,
+        /// Capture Gamescope's Gaming Mode output instead of using a portal.
+        #[arg(long, conflicts_with = "saved_permission")]
+        gamescope: bool,
     },
     /// Match the selected monitor's four edge regions on the four G560 zones.
     Run,
+    /// Match Bazzite Gaming Mode through Gamescope's native PipeWire source.
+    RunGaming,
 }
 
 #[derive(Debug, Default, Deserialize, Serialize)]
@@ -160,25 +168,87 @@ async fn main() -> Result<()> {
             }
             println!("calibration completed without USB errors; final all-zone black succeeded");
         }
-        Command::CaptureTest { frames } => {
-            let grant = PortalCapture::open(None).await?;
-            let permission_is_persistent = grant.restore_token.is_some();
-            let mut source = GStreamerFrameSource::open(grant).await?;
+        Command::CaptureTest {
+            frames,
+            saved_permission,
+            gamescope,
+        } => {
+            let (mut source, permission_status): (Box<dyn FrameSource>, _) = if gamescope {
+                (
+                    Box::new(GamescopeFrameSource::open().await?),
+                    "not applicable",
+                )
+            } else {
+                let restore_token = if saved_permission {
+                    load_capture_config(&capture_config_path()?)?.restore_token
+                } else {
+                    None
+                };
+                let grant = PortalCapture::open(restore_token).await?;
+                let permission_status = if grant.restore_token.is_some() {
+                    "yes"
+                } else {
+                    "not returned"
+                };
+                (
+                    Box::new(GStreamerFrameSource::open(grant).await?),
+                    permission_status,
+                )
+            };
             let started = Instant::now();
-            let capture_result: Result<(usize, usize)> = async {
+            let capture_result: Result<(usize, usize, usize, usize, u8, ZoneColors)> = async {
                 let mut dimensions = None;
+                let mut non_black_frames = 0;
+                let mut peak_visible_pixels = 0;
+                let mut peak_component = 0;
+                let mut last_sampled = ZoneColors::BLACK;
                 for _ in 0..frames {
                     let frame = source
                         .next_frame()
                         .await?
                         .ok_or_else(|| anyhow::anyhow!("capture ended before {frames} frames"))?;
+                    let packed_stride = frame.width * 3;
+                    let mut visible_pixels = 0;
+                    let mut frame_peak = 0;
+                    for pixel in frame
+                        .pixels
+                        .chunks_exact(frame.stride)
+                        .flat_map(|row| row[..packed_stride].chunks_exact(3))
+                    {
+                        let component = *pixel.iter().max().expect("RGB pixel has components");
+                        frame_peak = frame_peak.max(component);
+                        visible_pixels += usize::from(component >= 32);
+                    }
+                    if frame_peak != 0 {
+                        non_black_frames += 1;
+                    }
+                    peak_visible_pixels = peak_visible_pixels.max(visible_pixels);
+                    peak_component = peak_component.max(frame_peak);
+                    let masks =
+                        ZoneMasks::compile(&ZoneLayout::g560_default(), frame.width, frame.height)?;
+                    last_sampled = sample_zones(&frame, &masks, SamplerConfig::default());
                     dimensions = Some((frame.width, frame.height));
                 }
-                Ok(dimensions.expect("positive frame count has dimensions"))
+                let (width, height) = dimensions.expect("positive frame count has dimensions");
+                Ok((
+                    width,
+                    height,
+                    non_black_frames,
+                    peak_visible_pixels,
+                    peak_component,
+                    last_sampled,
+                ))
             }
             .await;
-            let shutdown_result = source.shutdown().await.map_err(anyhow::Error::new);
-            let (width, height) = match (capture_result, shutdown_result) {
+            let shutdown_result = source.shutdown().await;
+            let (
+                width,
+                height,
+                non_black_frames,
+                peak_visible_pixels,
+                peak_component,
+                last_sampled,
+            ) = match (capture_result, shutdown_result) {
                 (Ok(dimensions), Ok(())) => dimensions,
                 (Err(error), Ok(())) => return Err(error),
                 (Ok(_), Err(error)) => return Err(error),
@@ -191,16 +261,14 @@ async fn main() -> Result<()> {
             let elapsed = started.elapsed();
             let effective_fps = frames as f64 / elapsed.as_secs_f64();
             println!(
-                "captured {frames} frames at {width}x{height} in {:.2}s ({effective_fps:.1} fps); persistent permission: {}; saved images: 0",
+                "captured {frames} frames at {width}x{height} in {:.2}s ({effective_fps:.1} fps); non-black frames: {non_black_frames}; peak visible pixels: {peak_visible_pixels}/{}; peak component: {peak_component}; sampled zones: {last_sampled:?}; persistent permission: {}; saved images: 0",
                 elapsed.as_secs_f64(),
-                if permission_is_persistent {
-                    "yes"
-                } else {
-                    "not returned"
-                }
+                width * height,
+                permission_status,
             );
         }
         Command::Run => run_live().await?,
+        Command::RunGaming => run_gaming().await?,
     }
     Ok(())
 }
@@ -213,6 +281,20 @@ async fn run_live() -> Result<()> {
         restore_token: saved_restore_token,
         has_opened: false,
     });
+    drive_live(source).await
+}
+
+async fn run_gaming() -> Result<()> {
+    eprintln!("starting Gaming Mode capture from PipeWire node `gamescope`");
+    let source = RecoveringFrameSource::new(GamescopeFrameSourceFactory);
+    drive_live(source).await
+}
+
+async fn drive_live<F>(source: RecoveringFrameSource<F>) -> Result<()>
+where
+    F: FrameSourceFactory + 'static,
+    F::Source: 'static,
+{
     let capture_recovery_metrics = source.metrics();
 
     let cancellation = CancellationToken::new();
@@ -236,6 +318,7 @@ async fn run_live() -> Result<()> {
         }
         return Err(error.context("initial G560 blackout failed"));
     }
+    eprintln!("G560 opened and safety blackout completed; waiting for capture frames");
 
     let metrics = EngineMetrics::new();
     let mut previous = metrics.snapshot();
@@ -294,6 +377,25 @@ async fn run_live() -> Result<()> {
         Ok(_) => Ok(()),
         Err(error) if capture_was_cancelled(&error) => Ok(()),
         Err(error) => Err(error),
+    }
+}
+
+struct GamescopeFrameSourceFactory;
+
+#[async_trait::async_trait]
+impl FrameSourceFactory for GamescopeFrameSourceFactory {
+    type Source = GamescopeFrameSource;
+
+    async fn open(&mut self) -> Result<Self::Source> {
+        let source = GamescopeFrameSource::open()
+            .await
+            .map_err(anyhow::Error::from)?;
+        eprintln!("Gamescope PipeWire capture worker started; waiting for frames");
+        Ok(source)
+    }
+
+    fn should_retry(&self, error: &anyhow::Error) -> bool {
+        !capture_was_cancelled(error)
     }
 }
 
@@ -373,7 +475,7 @@ fn capture_error_is_retryable(error: &CaptureError, has_opened: bool) -> bool {
     match error {
         CaptureError::Portal { .. } => true,
         CaptureError::Pipeline { .. } | CaptureError::Shutdown { .. } => has_opened,
-        CaptureError::GStreamer { .. } => has_opened,
+        CaptureError::GStreamer { .. } | CaptureError::PipeWire { .. } => has_opened,
         CaptureError::Cleanup { primary, .. } => capture_error_is_retryable(primary, has_opened),
         CaptureError::CaptureCancelled
         | CaptureError::UnexpectedStreamCount { .. }

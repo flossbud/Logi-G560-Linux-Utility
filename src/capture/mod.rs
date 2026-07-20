@@ -1,6 +1,8 @@
+pub mod gamescope;
 pub mod gstreamer;
 pub mod portal;
 
+pub use gamescope::GamescopeFrameSource;
 pub use gstreamer::GStreamerFrameSource;
 pub use portal::{PortalCapture, PortalGrant};
 
@@ -14,6 +16,11 @@ pub enum CaptureError {
     UnexpectedStreamCount { count: usize },
     #[error("GStreamer {stage} failed: {message}")]
     GStreamer {
+        stage: &'static str,
+        message: String,
+    },
+    #[error("PipeWire {stage} failed: {message}")]
+    PipeWire {
         stage: &'static str,
         message: String,
     },
