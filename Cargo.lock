@@ -972,6 +972,7 @@ dependencies = [
  "gstreamer-app",
  "gstreamer-video",
  "hdrhistogram",
+ "logilightshow-api",
  "palette",
  "pipewire",
  "proptest",
@@ -984,6 +985,15 @@ dependencies = [
  "toml 0.9.12+spec-1.1.0",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "logilightshow-api"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "thiserror",
+ "zvariant",
 ]
 
 [[package]]

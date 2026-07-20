@@ -15,5 +15,10 @@ pub use engine::{
 };
 pub use frame::{Point, Polygon, RgbFrame, ZoneLayout, ZoneMasks};
 pub use latest::{LatestReceiver, LatestSender, latest_channel};
+pub use logilightshow_api::{
+    API_VERSION, ApiError, BUS_NAME, CaptureBackend, DiagnosticCounters, HealthState,
+    INTERFACE_NAME, LightingMode, ManualZone, ManualZoneUpdate, OBJECT_PATH, RgbColor,
+    ServiceSnapshot, ZoneColor, ZoneId, validate_manual_updates,
+};
 pub use sampler::{SamplerConfig, sample_zones};
 pub use transition::{DEFAULT_TRANSITION_DURATION, TransitionController};

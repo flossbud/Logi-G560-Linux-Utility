@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.97.1"
 
+[workspace]
+members = [".", "crates/logilightshow-api"]
+resolver = "3"
+
 [dependencies]
 anyhow = "1.0"
 async-trait = "0.1"
@@ -15,6 +19,7 @@ gstreamer = "0.25"
 gstreamer-app = "0.25"
 gstreamer-video = { version = "0.25", features = ["v1_24"] }
 hdrhistogram = "7.5"
+logilightshow-api = { path = "crates/logilightshow-api" }
 palette = "0.7"
 pipewire = { version = "0.10", features = ["v1_2_0"] }
 rusb = "0.9.4"
