@@ -197,17 +197,96 @@ fn build_pipeline(pipeline: &gst::Pipeline, grant: &PortalGrant) -> Result<RgbTa
         .property_from_str("on-disconnect", "error")
         .build()
         .map_err(|error| gst_error("pipewiresrc construction", error))?;
-    let appsink = attach_rgb_tail(pipeline, &pipewire)?;
+    let appsink = attach_rgb_tail_with_direct_scanout(pipeline, &pipewire, true)?;
     pipeline
         .set_state(gst::State::Playing)
         .map_err(|error| gst_error("pipeline start", error))?;
     Ok(appsink)
 }
 
+#[cfg(test)]
 fn attach_rgb_tail(
     pipeline: &gst::Pipeline,
     source: &gst::Element,
 ) -> Result<RgbTail, CaptureError> {
+    attach_rgb_tail_with_direct_scanout(pipeline, source, false)
+}
+
+fn direct_scanout_input_caps() -> gst::Caps {
+    gst::Caps::builder("video/x-raw")
+        .features(["memory:DMABuf"])
+        .field("format", "DMA_DRM")
+        .field(
+            "drm-format",
+            gst::List::new(["XR24", "AR24", "XB24", "AB24", "NV12"]),
+        )
+        .build()
+}
+
+struct DirectScanoutBridge {
+    input_filter: gst::Element,
+    wall_clock_pacer: gst::Element,
+    rate_limit: gst::Element,
+    rate_filter: gst::Element,
+    upload: gst::Element,
+    color_convert: gst::Element,
+    download: gst::Element,
+    output_filter: gst::Element,
+}
+
+fn direct_scanout_bridge() -> Result<DirectScanoutBridge, CaptureError> {
+    let make = |name, stage| {
+        gst::ElementFactory::make(name)
+            .build()
+            .map_err(|error| gst_error(stage, error))
+    };
+    let input_filter = gst::ElementFactory::make("capsfilter")
+        .property("caps", direct_scanout_input_caps())
+        .build()
+        .map_err(|error| gst_error("DMA-BUF capsfilter construction", error))?;
+    let output_caps = gst::Caps::builder("video/x-raw")
+        .field("format", "RGBA")
+        .build();
+    let output_filter = gst::ElementFactory::make("capsfilter")
+        .property("caps", output_caps)
+        .build()
+        .map_err(|error| gst_error("system-memory capsfilter construction", error))?;
+    let rate_caps = gst::Caps::builder("video/x-raw")
+        .features(["memory:DMABuf"])
+        .field("format", "DMA_DRM")
+        .field("framerate", gst::Fraction::new(20, 1))
+        .build();
+    Ok(DirectScanoutBridge {
+        input_filter,
+        // The upstream one-buffer leaky queue retains the newest frame while
+        // this wall-clock delay prevents bad compositor timestamps from
+        // bursting expensive GL conversions above the sampler's useful rate.
+        wall_clock_pacer: gst::ElementFactory::make("identity")
+            .property("sleep-time", 50_000_u32)
+            .build()
+            .map_err(|error| gst_error("DMA-BUF wall-clock pacer construction", error))?,
+        rate_limit: gst::ElementFactory::make("videorate")
+            .property("drop-only", true)
+            .property("max-rate", 20_i32)
+            .build()
+            .map_err(|error| gst_error("DMA-BUF rate limiter construction", error))?,
+        rate_filter: gst::ElementFactory::make("capsfilter")
+            .property("caps", rate_caps)
+            .build()
+            .map_err(|error| gst_error("DMA-BUF rate capsfilter construction", error))?,
+        upload: make("glupload", "GL upload construction")?,
+        color_convert: make("glcolorconvert", "GL color conversion construction")?,
+        download: make("gldownload", "GL download construction")?,
+        output_filter,
+    })
+}
+
+fn attach_rgb_tail_with_direct_scanout(
+    pipeline: &gst::Pipeline,
+    source: &gst::Element,
+    require_dmabuf: bool,
+) -> Result<RgbTail, CaptureError> {
+    let direct_scanout = require_dmabuf.then(direct_scanout_bridge).transpose()?;
     let queue = gst::ElementFactory::make("queue")
         .property_from_str("leaky", "downstream")
         .property("max-size-buffers", 1_u32)
@@ -234,7 +313,45 @@ fn attach_rgb_tail(
     let expected_dimensions = Arc::new(AtomicU64::new(0));
 
     pipeline
-        .add_many([
+        .add(source)
+        .map_err(|error| gst_error("pipeline assembly", error))?;
+    if let Some(bridge) = &direct_scanout {
+        pipeline
+            .add_many([
+                &bridge.input_filter,
+                &bridge.wall_clock_pacer,
+                &bridge.rate_limit,
+                &bridge.rate_filter,
+                &bridge.upload,
+                &bridge.color_convert,
+                &bridge.download,
+                &bridge.output_filter,
+            ])
+            .map_err(|error| gst_error("pipeline assembly", error))?;
+    }
+    pipeline
+        .add_many([&queue, &convert, &scale, &caps_filter, appsink.upcast_ref()])
+        .map_err(|error| gst_error("pipeline assembly", error))?;
+    if let Some(bridge) = &direct_scanout {
+        gst::Element::link_many([
+            source,
+            &bridge.input_filter,
+            &queue,
+            &bridge.wall_clock_pacer,
+            &bridge.rate_limit,
+            &bridge.rate_filter,
+            &bridge.upload,
+            &bridge.color_convert,
+            &bridge.download,
+            &bridge.output_filter,
+            &convert,
+            &scale,
+            &caps_filter,
+            appsink.upcast_ref(),
+        ])
+        .map_err(|error| gst_error("pipeline DMA-BUF bridge linking", error))?;
+    } else {
+        gst::Element::link_many([
             source,
             &queue,
             &convert,
@@ -242,16 +359,8 @@ fn attach_rgb_tail(
             &caps_filter,
             appsink.upcast_ref(),
         ])
-        .map_err(|error| gst_error("pipeline assembly", error))?;
-    gst::Element::link_many([
-        source,
-        &queue,
-        &convert,
-        &scale,
-        &caps_filter,
-        appsink.upcast_ref(),
-    ])
-    .map_err(|error| gst_error("pipeline linking", error))?;
+        .map_err(|error| gst_error("pipeline linking", error))?;
+    }
     install_output_caps_probe(source, &caps_filter, &expected_dimensions)?;
     Ok(RgbTail {
         appsink,
@@ -413,10 +522,11 @@ impl FrameSource for GStreamerFrameSource {
                 stage: "bus lookup",
                 message: "pipeline has no bus".to_owned(),
             })?;
-        next_frame_from_sink(&self.appsink, &bus, &self.expected_dimensions)
-            .await
-            .map(Some)
-            .map_err(Into::into)
+        match next_frame_from_sink(&self.appsink, &bus, &self.expected_dimensions).await {
+            Ok(frame) => Ok(Some(frame)),
+            Err(CaptureError::EndOfStream) => Ok(None),
+            Err(error) => Err(error.into()),
+        }
     }
 
     async fn shutdown(&mut self) -> anyhow::Result<()> {
@@ -582,7 +692,137 @@ mod tests {
     use gstreamer_app as gst_app;
     use gstreamer_video::{VideoFormat, VideoFrameFlags, VideoInfo, VideoMeta};
 
-    use super::{CaptureError, frame_from_sample};
+    use super::{CaptureError, direct_scanout_input_caps, frame_from_sample};
+
+    #[test]
+    fn direct_scanout_input_requires_dmabuf_memory() {
+        gst::init().unwrap();
+        let caps = direct_scanout_input_caps();
+
+        assert_eq!(caps.size(), 1);
+        assert_eq!(caps.structure(0).unwrap().name(), "video/x-raw");
+        assert!(caps.features(0).unwrap().contains("memory:DMABuf"));
+        assert_eq!(
+            caps.structure(0).unwrap().get::<&str>("format").unwrap(),
+            "DMA_DRM"
+        );
+        let formats = caps
+            .structure(0)
+            .unwrap()
+            .get::<gst::List>("drm-format")
+            .unwrap();
+        assert!(formats.as_slice().iter().all(|format| {
+            matches!(
+                format.get::<&str>(),
+                Ok("XR24" | "AR24" | "XB24" | "AB24" | "NV12")
+            )
+        }));
+    }
+
+    #[test]
+    fn direct_scanout_bridge_links_dmabuf_input_to_system_rgb_output() {
+        gst::init().unwrap();
+        let pipeline = gst::Pipeline::default();
+        let source = gst::ElementFactory::make("fakesrc").build().unwrap();
+
+        let tail = super::attach_rgb_tail_with_direct_scanout(&pipeline, &source, true).unwrap();
+
+        assert!(pipeline.children().contains(&tail.appsink.upcast()));
+    }
+
+    #[test]
+    fn direct_scanout_bridge_drops_before_conversion_at_sampler_rate() {
+        gst::init().unwrap();
+        let pipeline = gst::Pipeline::default();
+        let source = gst::ElementFactory::make("fakesrc").build().unwrap();
+
+        super::attach_rgb_tail_with_direct_scanout(&pipeline, &source, true).unwrap();
+
+        let rate_limit = pipeline
+            .children()
+            .into_iter()
+            .find(|element| {
+                element
+                    .factory()
+                    .is_some_and(|factory| factory.name() == "videorate")
+            })
+            .expect("the live DMA-BUF path must rate-limit before conversion");
+        let wall_clock_pacer = pipeline
+            .children()
+            .into_iter()
+            .find(|element| {
+                element
+                    .factory()
+                    .is_some_and(|factory| factory.name() == "identity")
+            })
+            .expect("the live DMA-BUF path must pace timestamp bursts before conversion");
+        assert_eq!(wall_clock_pacer.property::<u32>("sleep-time"), 50_000);
+        assert!(rate_limit.property::<bool>("drop-only"));
+        assert_eq!(rate_limit.property::<i32>("max-rate"), 20);
+        let rate_caps = pipeline
+            .children()
+            .into_iter()
+            .filter(|element| {
+                element
+                    .factory()
+                    .is_some_and(|factory| factory.name() == "capsfilter")
+            })
+            .filter_map(|element| element.property::<Option<gst::Caps>>("caps"))
+            .find(|caps| {
+                caps.structure(0).is_some_and(|structure| {
+                    structure.get::<gst::Fraction>("framerate") == Ok(gst::Fraction::new(20, 1))
+                })
+            })
+            .expect("videorate must negotiate a fixed 20 FPS output cap");
+        assert!(rate_caps.features(0).unwrap().contains("memory:DMABuf"));
+        assert_eq!(
+            rate_caps
+                .structure(0)
+                .unwrap()
+                .get::<&str>("format")
+                .unwrap(),
+            "DMA_DRM"
+        );
+        assert_eq!(
+            source
+                .static_pad("src")
+                .unwrap()
+                .peer()
+                .unwrap()
+                .parent_element()
+                .unwrap()
+                .factory()
+                .unwrap()
+                .name(),
+            "capsfilter"
+        );
+        assert_eq!(
+            rate_limit
+                .static_pad("sink")
+                .unwrap()
+                .peer()
+                .unwrap()
+                .parent_element()
+                .unwrap()
+                .factory()
+                .unwrap()
+                .name(),
+            "identity"
+        );
+        assert_eq!(
+            wall_clock_pacer
+                .static_pad("sink")
+                .unwrap()
+                .peer()
+                .unwrap()
+                .parent_element()
+                .unwrap()
+                .factory()
+                .unwrap()
+                .name(),
+            "queue"
+        );
+    }
     use crate::RgbFrame;
 
     fn sample(format: &str, bytes: Vec<u8>) -> gst::Sample {

@@ -9,6 +9,7 @@ anyhow = "1.0"
 async-trait = "0.1"
 ashpd = { version = "0.13.12", default-features = false, features = ["tokio", "screencast"] }
 clap = { version = "4.5", features = ["derive"] }
+directories = "6"
 futures-util = "0.3"
 gstreamer = "0.25"
 gstreamer-app = "0.25"
@@ -18,7 +19,8 @@ palette = "0.7"
 rusb = "0.9.4"
 serde = { version = "1.0", features = ["derive"] }
 thiserror = "2.0"
-tokio = { version = "1.51", features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }
+tokio = { version = "1.51", features = ["macros", "rt-multi-thread", "signal", "sync", "test-util", "time"] }
+tokio-util = { version = "0.7", features = ["rt"] }
 toml = "0.9"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

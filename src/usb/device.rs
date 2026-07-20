@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use crate::{LightSink, Zone, ZoneColors};
+use crate::{LightSink, Zone, ZoneColors, engine::LightUpdateStatus};
 
 use super::{encode_solid, protocol::encode_solid_index};
 
@@ -239,6 +239,24 @@ impl<T: UsbTransport, D: ReportDelay + Send> LightSink for G560<T, D> {
     async fn write(&mut self, colors: ZoneColors) -> anyhow::Result<()> {
         G560::write(self, colors).map_err(Into::into)
     }
+
+    async fn blackout(&mut self) -> anyhow::Result<()> {
+        G560::blackout(self).map_err(Into::into)
+    }
+
+    async fn write_update(
+        &mut self,
+        colors: ZoneColors,
+        _captured_at: std::time::Instant,
+    ) -> anyhow::Result<LightUpdateStatus> {
+        let changed = self.previous != Some(colors);
+        G560::write(self, colors)?;
+        Ok(if changed {
+            LightUpdateStatus::Rendered
+        } else {
+            LightUpdateStatus::Unchanged
+        })
+    }
 }
 
 #[cfg(test)]
@@ -302,6 +320,28 @@ mod tests {
                 .collect::<Vec<_>>(),
             [&[1, 2, 3], &[4, 5, 6], &[7, 8, 9], &[10, 11, 12]]
         );
+    }
+
+    #[tokio::test]
+    async fn light_sink_distinguishes_hardware_write_from_unchanged_state() {
+        let reports = Arc::new(Mutex::new(Vec::new()));
+        let delays = Arc::new(Mutex::new(Vec::new()));
+        let mut device = G560::with_delay(FakeTransport(reports.clone()), RecordingDelay(delays));
+        let colors = ZoneColors([Rgb8 { r: 1, g: 2, b: 3 }; 4]);
+
+        assert_eq!(
+            LightSink::write_update(&mut device, colors, std::time::Instant::now())
+                .await
+                .unwrap(),
+            crate::engine::LightUpdateStatus::Rendered
+        );
+        assert_eq!(
+            LightSink::write_update(&mut device, colors, std::time::Instant::now())
+                .await
+                .unwrap(),
+            crate::engine::LightUpdateStatus::Unchanged
+        );
+        assert_eq!(reports.lock().unwrap().len(), 4);
     }
 
     #[test]
