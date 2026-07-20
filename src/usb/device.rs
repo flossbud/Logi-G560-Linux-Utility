@@ -178,9 +178,8 @@ pub struct G560<T, D = ThreadDelay> {
 }
 
 /// Adapter that keeps synchronous USB I/O off Tokio worker threads.
-/// A single mutex preserves report ordering and ownership; each operation is
-/// executed on Tokio's bounded blocking pool and therefore cannot stall the
-/// async capture/recovery tasks.
+/// A dedicated standard-library worker owns the device and drains a bounded
+/// FIFO queue, preserving report ordering and the 100 ms transfer bound.
 pub struct AsyncG560<T, D = ThreadDelay> {
     tx: SyncSender<UsbCommand>,
     safety: Arc<AtomicBool>,
