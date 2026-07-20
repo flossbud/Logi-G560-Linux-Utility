@@ -573,17 +573,26 @@ mod tests {
                 b: 12,
             }; 4],
         );
-        let enqueue = |tx: SyncSender<UsbCommand>, colors| async move {
+        let enqueue = |tx: SyncSender<UsbCommand>,
+                       colors,
+                       ready: Option<tokio::sync::oneshot::Sender<()>>| async move {
             let (s, r) = tokio::sync::oneshot::channel();
             tx.send(UsbCommand::Write(colors, s)).unwrap();
+            if let Some(ready) = ready {
+                ready.send(()).unwrap();
+            }
             r.await.unwrap().unwrap()
         };
-        let first_task = tokio::spawn(enqueue(sink.tx.clone(), first));
+        let first_task = tokio::spawn(enqueue(sink.tx.clone(), first, None));
         tokio::task::spawn_blocking(move || entered_rx.recv().unwrap())
             .await
             .unwrap();
-        let a = tokio::spawn(enqueue(sink.tx.clone(), queued_a));
-        let b = tokio::spawn(enqueue(sink.tx.clone(), queued_b));
+        let (a_ready_tx, a_ready_rx) = tokio::sync::oneshot::channel();
+        let (b_ready_tx, b_ready_rx) = tokio::sync::oneshot::channel();
+        let a = tokio::spawn(enqueue(sink.tx.clone(), queued_a, Some(a_ready_tx)));
+        let b = tokio::spawn(enqueue(sink.tx.clone(), queued_b, Some(b_ready_tx)));
+        a_ready_rx.await.unwrap();
+        b_ready_rx.await.unwrap();
         let safety = sink.safety.clone();
         let blackout_tx = sink.tx.clone();
         let blackout = tokio::spawn(async move {
@@ -592,12 +601,15 @@ mod tests {
             blackout_tx.send(UsbCommand::Blackout(s)).unwrap();
             r.await.unwrap().unwrap();
         });
+        while !sink.safety.load(Ordering::Acquire) {
+            tokio::task::yield_now().await;
+        }
         release_tx.send(()).unwrap();
         first_task.await.unwrap();
         a.await.unwrap();
         b.await.unwrap();
         blackout.await.unwrap();
-        let _post_result = enqueue(sink.tx.clone(), post).await;
+        let _post_result = enqueue(sink.tx.clone(), post, None).await;
         let reports = reports.lock().unwrap();
         assert_eq!(reports.len(), 12);
         assert_eq!(&reports[0][6..9], &[1, 2, 3]);
