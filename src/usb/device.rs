@@ -6,7 +6,12 @@ use super::{encode_solid, protocol::encode_solid_index};
 
 const INTERFACE: u8 = 2;
 const REPORT_LEN: usize = 20;
-const REPORT_DELAY: Duration = Duration::from_millis(20);
+/// Calibrated minimum delay between adjacent G560 HID reports.
+///
+/// The attached firmware (`90.64`) completed the full 4 ms diagnostic stage
+/// without errors. Production keeps the approved 2 ms safety margin.
+pub const REPORT_DELAY: Duration = Duration::from_millis(6);
+const MIN_REPORT_DELAY: Duration = Duration::from_millis(1);
 
 #[derive(Debug, thiserror::Error)]
 pub enum UsbError {
@@ -29,6 +34,24 @@ pub enum UsbError {
     ShortWrite { expected: usize, actual: usize },
     #[error("invalid G560 protocol zone index {0}; expected 0 through 3")]
     InvalidZoneIndex(u8),
+    #[error("invalid USB report delay {0:?}; expected at least 1 ms")]
+    InvalidReportDelay(Duration),
+}
+
+#[derive(Debug)]
+pub struct CalibrationReport {
+    pub attempted_reports: u64,
+    pub successful_reports: u64,
+    pub first_error: Option<String>,
+    pub cleanup_attempted_reports: u64,
+    pub cleanup_successful_reports: u64,
+    pub cleanup_error: Option<String>,
+}
+
+impl CalibrationReport {
+    pub fn succeeded(&self) -> bool {
+        self.first_error.is_none() && self.cleanup_error.is_none()
+    }
 }
 
 pub trait UsbTransport: Send {
@@ -144,6 +167,7 @@ impl ReportDelay for ThreadDelay {
 pub struct G560<T, D = ThreadDelay> {
     transport: T,
     delay: D,
+    report_delay: Duration,
     previous: Option<ZoneColors>,
     has_sent_report: bool,
 }
@@ -153,9 +177,26 @@ impl<T: UsbTransport> G560<T, ThreadDelay> {
         Self {
             transport,
             delay: ThreadDelay,
+            report_delay: REPORT_DELAY,
             previous: None,
             has_sent_report: false,
         }
+    }
+
+    /// Opens a diagnostic device only after validating its caller-supplied
+    /// report delay. Production callers must continue to use [`G560::new`].
+    pub fn open_diagnostic(
+        report_delay: Duration,
+        open_transport: impl FnOnce() -> Result<T, UsbError>,
+    ) -> Result<Self, UsbError> {
+        validate_report_delay(report_delay)?;
+        Ok(Self {
+            transport: open_transport()?,
+            delay: ThreadDelay,
+            report_delay,
+            previous: None,
+            has_sent_report: false,
+        })
     }
 }
 
@@ -165,9 +206,26 @@ impl<T: UsbTransport, D: ReportDelay> G560<T, D> {
         Self {
             transport,
             delay,
+            report_delay: REPORT_DELAY,
             previous: None,
             has_sent_report: false,
         }
+    }
+
+    #[cfg(test)]
+    fn with_delay_and_report_delay(
+        transport: T,
+        delay: D,
+        report_delay: Duration,
+    ) -> Result<Self, UsbError> {
+        validate_report_delay(report_delay)?;
+        Ok(Self {
+            transport,
+            delay,
+            report_delay,
+            previous: None,
+            has_sent_report: false,
+        })
     }
 
     pub fn write(&mut self, colors: ZoneColors) -> Result<(), UsbError> {
@@ -183,6 +241,72 @@ impl<T: UsbTransport, D: ReportDelay> G560<T, D> {
         self.write_all(ZoneColors::BLACK)?;
         self.previous = Some(ZoneColors::BLACK);
         Ok(())
+    }
+
+    /// Rotates four distinct colors as fast as the configured diagnostic
+    /// report cadence permits. The first transfer error stops the stimulus;
+    /// cleanup still attempts a black report for every physical zone.
+    pub fn calibrate_pacing(&mut self, duration: Duration) -> CalibrationReport {
+        let mut report = CalibrationReport {
+            attempted_reports: 0,
+            successful_reports: 0,
+            first_error: None,
+            cleanup_attempted_reports: 0,
+            cleanup_successful_reports: 0,
+            cleanup_error: None,
+        };
+        let mut colors = [
+            crate::Rgb8 { r: 255, g: 0, b: 0 },
+            crate::Rgb8 { r: 0, g: 255, b: 0 },
+            crate::Rgb8 { r: 0, g: 0, b: 255 },
+            crate::Rgb8 {
+                r: 255,
+                g: 255,
+                b: 255,
+            },
+        ];
+        let started = std::time::Instant::now();
+
+        'calibration: while started.elapsed() < duration {
+            let frame = ZoneColors(colors);
+            for zone in [
+                Zone::LeftRear,
+                Zone::LeftFront,
+                Zone::RightFront,
+                Zone::RightRear,
+            ] {
+                report.attempted_reports += 1;
+                match self.send_report(&encode_solid(zone, frame.get(zone))) {
+                    Ok(()) => report.successful_reports += 1,
+                    Err(error) => {
+                        report.first_error = Some(error.to_string());
+                        break 'calibration;
+                    }
+                }
+            }
+            colors.rotate_left(1);
+        }
+
+        for zone in [
+            Zone::LeftRear,
+            Zone::LeftFront,
+            Zone::RightFront,
+            Zone::RightRear,
+        ] {
+            report.cleanup_attempted_reports += 1;
+            match self.send_report(&encode_solid(zone, crate::Rgb8::BLACK)) {
+                Ok(()) => report.cleanup_successful_reports += 1,
+                Err(error) => {
+                    report
+                        .cleanup_error
+                        .get_or_insert_with(|| error.to_string());
+                }
+            }
+        }
+        if report.cleanup_error.is_none() {
+            self.previous = Some(ZoneColors::BLACK);
+        }
+        report
     }
 
     /// Pulse one raw protocol zone for hardware mapping while retaining a
@@ -226,12 +350,18 @@ impl<T: UsbTransport, D: ReportDelay> G560<T, D> {
 
     fn send_report(&mut self, report: &[u8; REPORT_LEN]) -> Result<(), UsbError> {
         if self.has_sent_report {
-            self.delay.wait(REPORT_DELAY);
+            self.delay.wait(self.report_delay);
         }
-        self.transport.write_report(report)?;
         self.has_sent_report = true;
-        Ok(())
+        self.transport.write_report(report)
     }
+}
+
+fn validate_report_delay(report_delay: Duration) -> Result<(), UsbError> {
+    if report_delay < MIN_REPORT_DELAY {
+        return Err(UsbError::InvalidReportDelay(report_delay));
+    }
+    Ok(())
 }
 
 #[async_trait::async_trait]
@@ -365,6 +495,43 @@ mod tests {
     }
 
     #[test]
+    fn diagnostic_delay_is_used_between_every_report_across_calls() {
+        let reports = Arc::new(Mutex::new(Vec::new()));
+        let delays = Arc::new(Mutex::new(Vec::new()));
+        let diagnostic_delay = Duration::from_millis(7);
+        let mut device = G560::with_delay_and_report_delay(
+            FakeTransport(reports.clone()),
+            RecordingDelay(delays.clone()),
+            diagnostic_delay,
+        )
+        .unwrap();
+
+        device
+            .write(ZoneColors([Rgb8 { r: 1, g: 2, b: 3 }; 4]))
+            .unwrap();
+        device
+            .write(ZoneColors([Rgb8 { r: 4, g: 5, b: 6 }; 4]))
+            .unwrap();
+
+        assert_eq!(reports.lock().unwrap().len(), 8);
+        assert_eq!(*delays.lock().unwrap(), [diagnostic_delay; 7]);
+    }
+
+    #[test]
+    fn invalid_diagnostic_delay_is_rejected_before_transport_open() {
+        let opened = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let opened_by_factory = opened.clone();
+
+        let result = G560::<FakeTransport>::open_diagnostic(Duration::ZERO, move || {
+            opened_by_factory.store(true, std::sync::atomic::Ordering::SeqCst);
+            Ok(FakeTransport(Arc::new(Mutex::new(Vec::new()))))
+        });
+
+        assert!(matches!(result, Err(UsbError::InvalidReportDelay(_))));
+        assert!(!opened.load(std::sync::atomic::Ordering::SeqCst));
+    }
+
+    #[test]
     fn write_then_blackout_is_paced_across_the_call_boundary() {
         let reports = Arc::new(Mutex::new(Vec::new()));
         let delays = Arc::new(Mutex::new(Vec::new()));
@@ -447,6 +614,57 @@ mod tests {
         attempts: usize,
         fail_on: usize,
         successful: Arc<Mutex<Vec<[u8; REPORT_LEN]>>>,
+    }
+
+    #[test]
+    fn calibration_stops_on_first_transfer_failure_and_attempts_full_cleanup() {
+        let attempted = Arc::new(Mutex::new(Vec::new()));
+        let delays = Arc::new(Mutex::new(Vec::new()));
+        let report_delay = Duration::from_millis(4);
+        let mut device = G560::with_delay_and_report_delay(
+            RecordingFailOnAttemptTransport {
+                attempts: 0,
+                fail_on: 3,
+                attempted: attempted.clone(),
+            },
+            RecordingDelay(delays.clone()),
+            report_delay,
+        )
+        .unwrap();
+
+        let result = device.calibrate_pacing(Duration::from_secs(1));
+
+        assert_eq!(result.attempted_reports, 3);
+        assert_eq!(result.successful_reports, 2);
+        assert!(result.first_error.is_some());
+        let attempted = attempted.lock().unwrap();
+        assert_eq!(attempted.len(), 7, "failure plus four cleanup attempts");
+        assert!(
+            attempted[3..]
+                .iter()
+                .all(|report| report[6..9] == [0, 0, 0])
+        );
+        assert_eq!(*delays.lock().unwrap(), [report_delay; 6]);
+    }
+
+    struct RecordingFailOnAttemptTransport {
+        attempts: usize,
+        fail_on: usize,
+        attempted: Arc<Mutex<Vec<[u8; REPORT_LEN]>>>,
+    }
+
+    impl UsbTransport for RecordingFailOnAttemptTransport {
+        fn write_report(&mut self, report: &[u8; REPORT_LEN]) -> Result<(), UsbError> {
+            self.attempts += 1;
+            self.attempted.lock().unwrap().push(*report);
+            if self.attempts == self.fail_on {
+                return Err(UsbError::ShortWrite {
+                    expected: REPORT_LEN,
+                    actual: 0,
+                });
+            }
+            Ok(())
+        }
     }
 
     impl UsbTransport for FailOnAttemptTransport {

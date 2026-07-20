@@ -5,7 +5,7 @@ use palette::{FromColor, LinSrgb, Oklab, Srgb};
 
 use crate::{Rgb8, ZoneColors};
 
-pub const DEFAULT_TRANSITION_DURATION: Duration = Duration::from_millis(120);
+pub const DEFAULT_TRANSITION_DURATION: Duration = Duration::from_millis(90);
 
 #[derive(Clone, Copy, Debug)]
 pub struct TransitionController {
@@ -106,46 +106,61 @@ mod tests {
     const BLUE_ZONES: ZoneColors = ZoneColors([BLUE; 4]);
 
     #[test]
-    fn default_duration_is_120_milliseconds() {
-        assert_eq!(DEFAULT_TRANSITION_DURATION, Duration::from_millis(120));
+    fn default_duration_is_90_milliseconds() {
+        assert_eq!(DEFAULT_TRANSITION_DURATION, Duration::from_millis(90));
     }
 
     #[test]
     fn reaches_exact_endpoints_and_reports_completion() {
         let start = Instant::now();
         let mut transition =
-            TransitionController::new(ZoneColors::BLACK, Duration::from_millis(120));
+            TransitionController::new(ZoneColors::BLACK, Duration::from_millis(90));
 
         transition.retarget(RED_ZONES, start);
 
         assert_eq!(transition.colors_at(start), ZoneColors::BLACK);
-        let midpoint = transition.colors_at(start + Duration::from_millis(60));
+        let midpoint = transition.colors_at(start + Duration::from_millis(45));
         for color in midpoint.0 {
             assert!(color.r > 0 && color.r < 255);
         }
         assert!(!transition.is_complete(start));
-        assert!(!transition.is_complete(start + Duration::from_millis(119)));
+        assert!(!transition.is_complete(start + Duration::from_millis(89)));
         assert_eq!(
-            transition.colors_at(start + Duration::from_millis(120)),
+            transition.colors_at(start + Duration::from_millis(90)),
             RED_ZONES
         );
-        assert!(transition.is_complete(start + Duration::from_millis(120)));
+        assert!(transition.is_complete(start + Duration::from_millis(90)));
+    }
+
+    #[test]
+    fn quarter_time_uses_smoothstep_easing_not_linear_time() {
+        let start = Instant::now();
+        let mut transition =
+            TransitionController::new(ZoneColors::BLACK, Duration::from_millis(90));
+        transition.retarget(RED_ZONES, start);
+
+        let quarter = transition.colors_at(start + Duration::from_micros(22_500));
+        let expected = super::interpolate_oklab(Rgb8::BLACK, RED, 0.15625);
+        let linear = super::interpolate_oklab(Rgb8::BLACK, RED, 0.25);
+
+        assert_eq!(quarter, ZoneColors([expected; 4]));
+        assert_ne!(quarter, ZoneColors([linear; 4]));
     }
 
     #[test]
     fn retargeting_interrupts_from_the_current_visible_color() {
         let start = Instant::now();
         let mut transition =
-            TransitionController::new(ZoneColors::BLACK, Duration::from_millis(120));
+            TransitionController::new(ZoneColors::BLACK, Duration::from_millis(90));
         transition.retarget(RED_ZONES, start);
 
-        let interruption = start + Duration::from_millis(60);
+        let interruption = start + Duration::from_millis(45);
         let midway = transition.colors_at(interruption);
         transition.retarget(BLUE_ZONES, interruption);
 
         assert_eq!(transition.colors_at(interruption), midway);
         assert_eq!(
-            transition.colors_at(interruption + Duration::from_millis(120)),
+            transition.colors_at(interruption + Duration::from_millis(90)),
             BLUE_ZONES
         );
     }
@@ -153,10 +168,10 @@ mod tests {
     #[test]
     fn midpoint_uses_oklab_instead_of_raw_srgb() {
         let start = Instant::now();
-        let mut transition = TransitionController::new(RED_ZONES, Duration::from_millis(120));
+        let mut transition = TransitionController::new(RED_ZONES, Duration::from_millis(90));
         transition.retarget(BLUE_ZONES, start);
 
-        let midpoint = transition.colors_at(start + Duration::from_millis(60));
+        let midpoint = transition.colors_at(start + Duration::from_millis(45));
 
         assert_ne!(
             midpoint,
@@ -181,10 +196,10 @@ mod tests {
         fn arbitrary_transition_outputs_stay_in_rgb8_range(
             initial in arbitrary_zone_colors(),
             target in arbitrary_zone_colors(),
-            elapsed_ms in 0_u64..=240,
+            elapsed_ms in 0_u64..=180,
         ) {
             let start = Instant::now();
-            let mut transition = TransitionController::new(initial, Duration::from_millis(120));
+            let mut transition = TransitionController::new(initial, Duration::from_millis(90));
             transition.retarget(target, start);
 
             let colors = transition.colors_at(start + Duration::from_millis(elapsed_ms));

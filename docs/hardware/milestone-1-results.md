@@ -26,6 +26,47 @@ The planned 30-minute fullscreen four-quadrant stimulus was not run because it w
 - The user reported that fullscreen rotation worked "so very beautifully," audio remained uninterrupted, and all zones finished black.
 - Ordinary video and desktop use also drove the intended edges. The user found the immediate unsmoothed effect slightly overreactive; this is recorded as later tuning feedback, not a milestone-one functional failure.
 
+## V1 polygon and smoothing refinement
+
+The original rectangular edge regions were replaced with a complete, non-overlapping polygon layout tailored to the G560's physical light placement. Normalized vertices are:
+
+- Left rear: `(0,0) (0.50,0) (0.17,0.70) (0.14,1) (0,1)`
+- Left front: `(0.50,0) (0.50,1) (0.14,1) (0.17,0.70)`
+- Right front: `(0.50,0) (0.83,0.70) (0.86,1) (0.50,1)`
+- Right rear: `(0.50,0) (1,0) (1,1) (0.86,1) (0.83,0.70)`
+
+Compiled masks assign every sampled pixel to exactly one zone, use deterministic boundary ownership, and remain mirror-symmetric at odd and even dimensions. Normal scene changes now use an interruptible 90 ms OKLab smoothstep transition. Retargeting starts from the last color confirmed by the hardware; stale destinations are never queued. Safety blackouts remain immediate.
+
+### USB pacing calibration
+
+Audio played throughout. Each 15-second stage continuously rotated four distinct colors, stopped on the first transfer error if one occurred, and attempted four paced black cleanup reports. No stage failed.
+
+| Inter-report delay | Stimulus reports | Successful | Cleanup | USB errors |
+| ---: | ---: | ---: | ---: | ---: |
+| 18 ms | 824 | 824 | 4/4 | 0 |
+| 16 ms | 928 | 928 | 4/4 | 0 |
+| 14 ms | 1,056 | 1,056 | 4/4 | 0 |
+| 12 ms | 1,228 | 1,228 | 4/4 | 0 |
+| 10 ms | 1,468 | 1,468 | 4/4 | 0 |
+| 8 ms | 1,464 | 1,464 | 4/4 | 0 |
+| 6 ms | 1,932 | 1,932 | 4/4 | 0 |
+| 4 ms | 2,440 | 2,440 | 4/4 | 0 |
+
+The fastest passing interval was 4 ms. Applying the approved 2 ms safety margin selected a 6 ms production interval. A separate 120-second confirmation at 6 ms completed 15,416/15,416 stimulus reports and 4/4 cleanup reports with zero USB errors, uninterrupted audio, correct four-zone rotation, and final black. The diagnostic did not persist any value before this confirmation passed.
+
+### Final perceptual acceptance
+
+The release engine ran the updated polygon fixture fullscreen for 80.67 seconds, exceeding the required 60-second check:
+
+- 1,480 captured frames (18.35 FPS) and 1,470 rendered lighting updates (18.22 updates/s)
+- 10 newest-target replacements, zero capture stalls
+- Capture-to-write p50/p95/p99: 71.30/85.82/88.06 ms
+- Zero USB write errors, device open failures, reopens, blackout failures, capture stream/open/shutdown errors, or capture reopens
+- Mean CPU over a 60-second `pidstat` sample: 9.70% of one logical CPU
+- Resident memory: 103,940 KiB
+
+The calibrated path nearly doubled complete hardware updates from the earlier 120 ms/~9.6 updates/s baseline. The user confirmed correct polygon-to-speaker mapping, visibly smoother and faster-feeling transitions, uninterrupted audio, immediate black on lock, resume from black after unlock with fresh content, and all four zones black after Ctrl-C. Their final assessment was that the result was “perfect and ready.” This closes the V1 polygon/smoothing refinement gate.
+
 ## USB pre-acceptance evidence
 
 - A five-minute persistent-interface-claim color rotation completed with zero observed USB errors, correct physical zones, a final all-black state, and uninterrupted audio.
@@ -82,7 +123,7 @@ The RED live sample before the negotiated cap proved that setting only the `vide
 
 - SDR is the only color-accuracy guarantee. HDR remains unvalidated.
 - Milestone-one hardware testing is on GNOME Wayland. The fullscreen workaround currently requires DMA-BUF plus GStreamer OpenGL elements; KDE/Bazzite validation and packaging are milestone-two work.
-- The default response intentionally has no smoothing. The user's "slightly overreactive" observation belongs to later response/saturation tuning and does not justify changing the immediate milestone-one default.
+- The user's "slightly overreactive" feedback about the original snapping response is addressed by the 90 ms interruptible perceptual fade and calibrated 6 ms report cadence. Safety events intentionally remain unsmoothed.
 - Static or paused content is valid. The service does not treat unchanged pixels as capture failure and does not add a duplicate-content watchdog.
 
 ## Acceptance decision

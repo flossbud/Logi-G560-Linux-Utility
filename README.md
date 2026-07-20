@@ -1,6 +1,6 @@
 # LogiLightShow
 
-LogiLightShow is an experimental low-latency screen matcher for the Logitech G560 on Linux. The milestone-one CLI captures exactly one monitor through the desktop ScreenCast portal, samples four edge regions, and drives the speakers' four verified lighting zones. It targets Wayland sessions on Fedora and Bazzite; desktop integration and distributable Bazzite packaging are later milestones.
+LogiLightShow is an experimental low-latency screen matcher for the Logitech G560 on Linux. The milestone-one CLI captures exactly one monitor through the desktop ScreenCast portal, samples four polygons shaped for the speakers' front/rear light layout, and drives the four verified lighting zones. It targets Wayland sessions on Fedora and Bazzite; desktop integration and distributable Bazzite packaging are later milestones.
 
 ## Prerequisites
 
@@ -57,7 +57,15 @@ Start screen matching:
 
 The first run opens the monitor chooser. A returned restore token is atomically stored at `~/.config/logilightshow/capture.toml` with mode `0600`; later runs ask the portal to restore that same authorization. Press Ctrl-C (or send `SIGTERM`) for a clean stop and final all-zone blackout.
 
-While running, the CLI prints five-second captured-FPS and rendered-update rates, cumulative dropped-frame and capture-stall counts, cumulative capture-to-write p50/p95/p99 latency, and USB/capture recovery counters. It never logs sampled colors. Capture is paced to at most 20 frames per second before DMA-BUF/OpenGL conversion; the G560's verified four-report pacing normally limits changed lighting states to about 12 updates per second.
+While running, the CLI prints five-second captured-FPS and rendered-update rates, cumulative dropped-frame and capture-stall counts, cumulative capture-to-write p50/p95/p99 latency, and USB/capture recovery counters. It never logs sampled colors. Capture is paced to at most 20 frames per second before DMA-BUF/OpenGL conversion. In the final fullscreen hardware run, the calibrated USB cadence delivered 18.22 complete lighting updates/s from an 18.35 FPS capture stream without queuing stale states.
+
+The production USB driver spaces every adjacent HID report by the hardware-calibrated 6 ms interval, including across four-zone update boundaries. This value comes from error-free 15-second stages at 18, 16, 14, 12, 10, 8, 6, and 4 ms, followed by a two-minute confirmation at the selected 6 ms value (the fastest passing stage plus a 2 ms safety margin). The diagnostic can be repeated without changing saved settings:
+
+```bash
+~/.cargo/bin/cargo run --release -- calibrate-pacing --delay-ms 6 --seconds 15
+```
+
+Keep audio playing and observe the speakers during calibration. The command stops on the first USB transfer error, attempts a paced all-zone blackout, exits nonzero on failure, and never writes the diagnostic delay to configuration.
 
 For a short deterministic zone check, open the local test page, move it to the selected monitor, and optionally press F11:
 
@@ -72,7 +80,9 @@ The pattern is a diagnostic aid, not something that must remain open during norm
 - Capture is local and restricted to the one monitor authorized in the system chooser.
 - Frames are reduced in memory and discarded. No screenshot, thumbnail, pixel buffer, sampled color, or color history is written to disk or sent over a network.
 - The only persisted capture data is the portal restore token.
-- Dark regions turn fully off. Temporal smoothing is disabled.
+- Dark regions turn fully off.
+- Normal content changes follow an interruptible 90 ms OKLab smoothstep fade. New samples retarget from the currently displayed color, so old transitions never queue.
+- Lock, capture loss/stall, pause, shutdown, and USB recovery cleanup bypass the fade and request immediate black.
 - Milestone one guarantees color behavior for SDR content only. HDR color accuracy is not yet validated.
 
 ## Recovery and troubleshooting

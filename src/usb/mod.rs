@@ -1,5 +1,5 @@
 mod device;
 mod protocol;
 
-pub use device::{G560, LibUsbTransport, UsbError, UsbTransport};
+pub use device::{CalibrationReport, G560, LibUsbTransport, REPORT_DELAY, UsbError, UsbTransport};
 pub use protocol::encode_solid;

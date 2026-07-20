@@ -46,6 +46,13 @@ enum Command {
     },
     /// Five-minute hardware/audio verification with rotating per-zone colors.
     VerifySoak,
+    /// Diagnostic-only USB pacing calibration; never changes saved settings.
+    CalibratePacing {
+        #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
+        delay_ms: u64,
+        #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
+        seconds: u64,
+    },
     /// Capture frames from one portal-authorized monitor without saving images.
     CaptureTest {
         #[arg(long, default_value_t = 300, value_parser = clap::value_parser!(u64).range(1..))]
@@ -126,6 +133,32 @@ async fn main() -> Result<()> {
                 std::thread::sleep(Duration::from_millis(190));
             }
             device.blackout()?;
+        }
+        Command::CalibratePacing { delay_ms, seconds } => {
+            let delay = Duration::from_millis(delay_ms);
+            let mut device =
+                G560::<LibUsbTransport>::open_diagnostic(delay, LibUsbTransport::open)?;
+            println!(
+                "starting diagnostic USB pacing calibration: delay_ms={delay_ms} duration_s={seconds}; configuration writes: 0"
+            );
+            let report = device.calibrate_pacing(Duration::from_secs(seconds));
+            println!(
+                "calibration reports: attempted={} successful={}; cleanup reports: attempted={} successful={}",
+                report.attempted_reports,
+                report.successful_reports,
+                report.cleanup_attempted_reports,
+                report.cleanup_successful_reports,
+            );
+            if let Some(error) = report.first_error.as_deref() {
+                eprintln!("first calibration error: {error}");
+            }
+            if let Some(error) = report.cleanup_error.as_deref() {
+                eprintln!("first cleanup error: {error}");
+            }
+            if !report.succeeded() {
+                anyhow::bail!("USB pacing calibration failed");
+            }
+            println!("calibration completed without USB errors; final all-zone black succeeded");
         }
         Command::CaptureTest { frames } => {
             let grant = PortalCapture::open(None).await?;
@@ -455,6 +488,49 @@ mod tests {
     fn parses_run_command() {
         let cli = Cli::try_parse_from(["logilightshow", "run"]).unwrap();
         assert!(matches!(cli.command, Command::Run));
+    }
+
+    #[test]
+    fn calibration_cli_requires_positive_delay_and_duration() {
+        let cli = Cli::try_parse_from([
+            "logilightshow",
+            "calibrate-pacing",
+            "--delay-ms",
+            "6",
+            "--seconds",
+            "120",
+        ])
+        .unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::CalibratePacing {
+                delay_ms: 6,
+                seconds: 120
+            }
+        ));
+
+        assert!(
+            Cli::try_parse_from([
+                "logilightshow",
+                "calibrate-pacing",
+                "--delay-ms",
+                "0",
+                "--seconds",
+                "15",
+            ])
+            .is_err()
+        );
+        assert!(
+            Cli::try_parse_from([
+                "logilightshow",
+                "calibrate-pacing",
+                "--delay-ms",
+                "6",
+                "--seconds",
+                "0",
+            ])
+            .is_err()
+        );
     }
 
     #[test]

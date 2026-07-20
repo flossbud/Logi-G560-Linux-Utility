@@ -1234,6 +1234,32 @@ mod tests {
         assert_eq!(state.accept_update(update(30), now, true), Some(false));
     }
 
+    #[test]
+    fn writer_state_uses_90ms_transition_with_a_45ms_midpoint() {
+        let now = tokio::time::Instant::now();
+        let target = ZoneColors([Rgb8 { r: 255, g: 0, b: 0 }; 4]);
+        let update = SampledUpdate {
+            captured_at: Instant::now(),
+            colors: target,
+            capture_generation: 0,
+        };
+        let mut state = LightingWriterState::new();
+
+        assert_eq!(state.accept_update(update, now, true), Some(false));
+        let midpoint = state
+            .transition
+            .colors_at((now + Duration::from_millis(45)).into_std());
+
+        assert_ne!(midpoint, ZoneColors::BLACK);
+        assert_ne!(midpoint, target);
+        assert_eq!(
+            state
+                .transition
+                .colors_at((now + Duration::from_millis(90)).into_std()),
+            target
+        );
+    }
+
     #[tokio::test(start_paused = true)]
     async fn due_deadlines_win_repeatedly_while_target_input_stays_ready() {
         let (_safety_sender, mut safety_receiver) = mpsc::unbounded_channel();
@@ -1497,7 +1523,7 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn normal_target_emits_an_intermediate_before_exact_target_at_120ms() {
+    async fn normal_target_emits_an_intermediate_before_exact_target_at_90ms() {
         let (events, source, consumed, _) = event_source();
         let writes = Arc::new(Mutex::new(Vec::new()));
         let wrote = Arc::new(Notify::new());
@@ -1530,7 +1556,7 @@ mod tests {
         assert_ne!(first, ZoneColors::BLACK);
         assert_ne!(first, ZoneColors([Rgb8 { r: 255, g: 0, b: 0 }; 4]));
 
-        tokio::time::advance(Duration::from_millis(100)).await;
+        tokio::time::advance(Duration::from_millis(70)).await;
         wrote.notified().await;
         assert_eq!(
             *writes.lock().unwrap().last().unwrap(),
@@ -1641,7 +1667,7 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn retarget_at_60ms_abandons_red_and_fades_from_the_visible_intermediate() {
+    async fn retarget_abandons_red_and_fades_from_the_visible_intermediate() {
         let (events, source, consumed, _) = event_source();
         let (sink, operations, operation_started) = counting_sink();
         let sampled = Arc::new(Semaphore::new(0));
