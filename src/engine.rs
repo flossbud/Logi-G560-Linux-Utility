@@ -3,7 +3,10 @@ use std::{future::Future, sync::Arc, time::Instant};
 use anyhow::{Context, Result, anyhow};
 use tokio::sync::watch;
 
-use crate::{Region, RgbFrame, SamplerConfig, ZoneColors, latest_channel, sampler::sample_zones};
+use crate::{
+    RgbFrame, SamplerConfig, ZoneColors, ZoneLayout, ZoneMasks, latest_channel,
+    sampler::sample_zones,
+};
 
 #[async_trait::async_trait]
 pub trait FrameSource: Send {
@@ -42,7 +45,7 @@ struct SampledUpdate {
 pub async fn run_engine<S, L, C>(
     source: S,
     sink: L,
-    regions: [Region; 4],
+    layout: ZoneLayout,
     config: SamplerConfig,
     cancellation: C,
 ) -> Result<EngineStats>
@@ -51,13 +54,13 @@ where
     L: LightSink + 'static,
     C: Future<Output = ()> + Send,
 {
-    run_engine_with_sampler(source, sink, regions, config, cancellation, sample_zones).await
+    run_engine_with_sampler(source, sink, layout, config, cancellation, sample_zones).await
 }
 
 async fn run_engine_with_sampler<S, L, C, F>(
     mut source: S,
     mut sink: L,
-    regions: [Region; 4],
+    layout: ZoneLayout,
     config: SamplerConfig,
     cancellation: C,
     sampler: F,
@@ -66,7 +69,7 @@ where
     S: FrameSource + 'static,
     L: LightSink + 'static,
     C: Future<Output = ()> + Send,
-    F: Fn(&RgbFrame, &[Region; 4], SamplerConfig) -> ZoneColors + Send + Sync + 'static,
+    F: Fn(&RgbFrame, &ZoneMasks, SamplerConfig) -> ZoneColors + Send + Sync + 'static,
 {
     let (cancel_sender, cancel_receiver) = watch::channel(false);
     let (frame_sender, mut frame_receiver) = latest_channel::<CapturedFrame>();
@@ -159,6 +162,7 @@ where
     let sampler = Arc::new(sampler);
     let mut sampled_replacements = 0_u64;
     let mut sampling_error = None;
+    let mut masks = None::<Arc<ZoneMasks>>;
     let mut cancel = cancel_receiver;
     'sampling: loop {
         let captured = tokio::select! {
@@ -175,8 +179,25 @@ where
         };
         let Some(captured) = captured else { break };
         let CapturedFrame { captured_at, frame } = captured;
+        let dimensions_changed = masks
+            .as_ref()
+            .is_none_or(|masks| masks.width() != frame.width || masks.height() != frame.height);
+        if dimensions_changed {
+            match ZoneMasks::compile(&layout, frame.width, frame.height) {
+                Ok(compiled) => masks = Some(Arc::new(compiled)),
+                Err(error) => {
+                    sampling_error = Some(error.context("zone mask compilation failed"));
+                    let _ = cancel_sender.send(true);
+                    break;
+                }
+            }
+        }
+        let masks = masks
+            .as_ref()
+            .expect("the current frame has compiled masks")
+            .clone();
         let sampler = sampler.clone();
-        let sample = tokio::task::spawn_blocking(move || sampler(&frame, &regions, config));
+        let sample = tokio::task::spawn_blocking(move || sampler(&frame, &masks, config));
         tokio::pin!(sample);
         let colors = tokio::select! {
             biased;
@@ -254,19 +275,14 @@ mod tests {
     use tokio::sync::Notify;
 
     use super::{FrameSource, LightSink, run_engine_with_sampler};
-    use crate::{Region, Rgb8, RgbFrame, SamplerConfig, ZoneColors};
+    use crate::{Rgb8, RgbFrame, SamplerConfig, ZoneColors, ZoneLayout, ZoneMasks};
 
     fn frame(value: u8) -> RgbFrame {
         RgbFrame::new(1, 1, 3, vec![value, 0, 0]).unwrap()
     }
 
-    fn regions() -> [Region; 4] {
-        [Region {
-            x: 0.0,
-            y: 0.0,
-            width: 1.0,
-            height: 1.0,
-        }; 4]
+    fn layout() -> ZoneLayout {
+        ZoneLayout::g560_default()
     }
 
     struct TestSource {
@@ -337,7 +353,7 @@ mod tests {
             let started = started.clone();
             let gate = gate.clone();
             let sampled = sampled.clone();
-            move |frame: &RgbFrame, _: &[Region; 4], _: SamplerConfig| {
+            move |frame: &RgbFrame, _: &ZoneMasks, _: SamplerConfig| {
                 let value = frame.pixels[0];
                 sampled.lock().unwrap().push(value);
                 if value == 1 {
@@ -368,7 +384,7 @@ mod tests {
                 writes,
                 fail_blackout: false,
             },
-            regions(),
+            layout(),
             SamplerConfig::default(),
             std::future::pending(),
             sampler,
@@ -393,7 +409,7 @@ mod tests {
         let sampler = {
             let started = started.clone();
             let gate = gate.clone();
-            move |_: &RgbFrame, _: &[Region; 4], _: SamplerConfig| {
+            move |_: &RgbFrame, _: &ZoneMasks, _: SamplerConfig| {
                 started.notify_waiters();
                 let (lock, ready) = &*gate;
                 let guard = lock.lock().unwrap();
@@ -414,7 +430,7 @@ mod tests {
                 writes: writes.clone(),
                 fail_blackout: false,
             },
-            regions(),
+            layout(),
             SamplerConfig::default(),
             cancellation.clone().notified_owned(),
             sampler,
@@ -446,7 +462,7 @@ mod tests {
                 writes: writes.clone(),
                 fail_blackout: false,
             },
-            regions(),
+            layout(),
             SamplerConfig::default(),
             std::future::pending(),
             |_, _, _| ZoneColors::BLACK,
@@ -473,7 +489,7 @@ mod tests {
                 writes: writes.clone(),
                 fail_blackout: false,
             },
-            regions(),
+            layout(),
             SamplerConfig::default(),
             std::future::pending(),
             |_, _, _| panic!("fake sampling panic"),
@@ -504,7 +520,7 @@ mod tests {
                 writes: Arc::new(Mutex::new(Vec::new())),
                 fail_blackout: true,
             },
-            regions(),
+            layout(),
             SamplerConfig::default(),
             std::future::pending(),
             |_, _, _| ZoneColors::BLACK,
@@ -530,7 +546,7 @@ mod tests {
                 writes: Arc::new(Mutex::new(Vec::new())),
                 fail_blackout: false,
             },
-            regions(),
+            layout(),
             SamplerConfig::default(),
             std::future::pending(),
             |_, _, _| ZoneColors::BLACK,

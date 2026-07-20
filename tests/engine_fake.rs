@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use logilightshow::{
-    FrameSource, LightSink, Region, Rgb8, RgbFrame, SamplerConfig, ZoneColors, latest_channel,
+    FrameSource, LightSink, Rgb8, RgbFrame, SamplerConfig, ZoneColors, ZoneLayout, latest_channel,
     run_engine,
 };
 use tokio::sync::{Mutex, Notify};
@@ -92,17 +92,10 @@ async fn engine_writes_first_newest_and_black() {
         release_first_write: release_first_write.clone(),
         second_write_started: second_write_started.clone(),
     };
-    let regions = [Region {
-        x: 0.0,
-        y: 0.0,
-        width: 1.0,
-        height: 1.0,
-    }; 4];
-
     let engine = tokio::spawn(run_engine(
         source,
         sink,
-        regions,
+        ZoneLayout::g560_default(),
         SamplerConfig::default(),
         cancellation.clone().notified_owned(),
     ));

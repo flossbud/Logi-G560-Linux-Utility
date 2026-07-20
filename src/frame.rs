@@ -1,5 +1,7 @@
 use anyhow::{Result, ensure};
 
+use crate::Zone;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RgbFrame {
     pub width: usize,
@@ -31,71 +33,235 @@ impl RgbFrame {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Region {
+pub struct Point {
     pub x: f32,
     pub y: f32,
-    pub width: f32,
-    pub height: f32,
 }
 
-impl Region {
-    pub fn pixel_bounds(
-        self,
-        frame_width: usize,
-        frame_height: usize,
-    ) -> (usize, usize, usize, usize) {
-        assert!(frame_width > 0 && frame_height > 0);
+#[derive(Clone, Debug, PartialEq)]
+pub struct Polygon {
+    vertices: Vec<Point>,
+}
 
-        let x0 = normalized_start(self.x, frame_width);
-        let y0 = normalized_start(self.y, frame_height);
-        let x1 = normalized_end(self.x + self.width, frame_width, x0);
-        let y1 = normalized_end(self.y + self.height, frame_height, y0);
-        (x0, y0, x1, y1)
+impl Polygon {
+    pub fn new(vertices: Vec<Point>) -> Result<Self> {
+        ensure!(
+            vertices.len() >= 3,
+            "a polygon must have at least three vertices"
+        );
+        ensure!(
+            vertices
+                .iter()
+                .all(|point| point.x.is_finite() && point.y.is_finite()),
+            "polygon coordinates must be finite"
+        );
+        Ok(Self { vertices })
+    }
+
+    pub fn vertices(&self) -> &[Point] {
+        &self.vertices
     }
 }
 
-fn normalized_start(value: f32, extent: usize) -> usize {
-    let boundary = (value.clamp(0.0, 1.0) * extent as f32).floor() as usize;
-    boundary.min(extent - 1)
+#[derive(Clone, Debug, PartialEq)]
+pub struct ZoneLayout {
+    polygons: [Polygon; 4],
 }
 
-fn normalized_end(value: f32, extent: usize, start: usize) -> usize {
-    let boundary = (value.clamp(0.0, 1.0) * extent as f32).ceil() as usize;
-    boundary.clamp(start + 1, extent)
+impl ZoneLayout {
+    pub fn new(polygons: [Polygon; 4]) -> Self {
+        Self { polygons }
+    }
+
+    pub fn g560_default() -> Self {
+        let polygon =
+            |vertices| Polygon::new(vertices).expect("the built-in G560 polygon must be valid");
+        Self::new([
+            polygon(vec![
+                Point { x: 0.00, y: 0.00 },
+                Point { x: 0.50, y: 0.00 },
+                Point { x: 0.17, y: 0.70 },
+                Point { x: 0.14, y: 1.00 },
+                Point { x: 0.00, y: 1.00 },
+            ]),
+            polygon(vec![
+                Point { x: 0.50, y: 0.00 },
+                Point { x: 0.50, y: 1.00 },
+                Point { x: 0.14, y: 1.00 },
+                Point { x: 0.17, y: 0.70 },
+            ]),
+            polygon(vec![
+                Point { x: 0.50, y: 0.00 },
+                Point { x: 0.83, y: 0.70 },
+                Point { x: 0.86, y: 1.00 },
+                Point { x: 0.50, y: 1.00 },
+            ]),
+            polygon(vec![
+                Point { x: 0.50, y: 0.00 },
+                Point { x: 1.00, y: 0.00 },
+                Point { x: 1.00, y: 1.00 },
+                Point { x: 0.86, y: 1.00 },
+                Point { x: 0.83, y: 0.70 },
+            ]),
+        ])
+    }
+
+    pub fn polygon(&self, zone: Zone) -> &Polygon {
+        &self.polygons[zone as usize]
+    }
 }
 
-pub fn default_regions() -> [Region; 4] {
-    [
-        Region {
-            x: 0.0,
-            y: 0.0,
-            width: 0.25,
-            height: 0.25,
-        },
-        Region {
-            x: 0.0,
-            y: 0.75,
-            width: 0.25,
-            height: 0.25,
-        },
-        Region {
-            x: 0.75,
-            y: 0.75,
-            width: 0.25,
-            height: 0.25,
-        },
-        Region {
-            x: 0.75,
-            y: 0.0,
-            width: 0.25,
-            height: 0.25,
-        },
-    ]
+#[derive(Clone, Debug, PartialEq)]
+pub struct ZoneMasks {
+    width: usize,
+    height: usize,
+    indices: [Vec<usize>; 4],
+}
+
+impl ZoneMasks {
+    pub fn compile(layout: &ZoneLayout, width: usize, height: usize) -> Result<Self> {
+        ensure!(width > 0, "mask width must be nonzero");
+        ensure!(height > 0, "mask height must be nonzero");
+        let pixel_count = width
+            .checked_mul(height)
+            .ok_or_else(|| anyhow::anyhow!("mask pixel count overflow"))?;
+        let mut indices: [Vec<usize>; 4] = std::array::from_fn(|_| Vec::new());
+
+        for index in 0..pixel_count {
+            let x = index % width;
+            let y = index / width;
+            let point = Point {
+                x: (x as f32 + 0.5) / width as f32,
+                y: (y as f32 + 0.5) / height as f32,
+            };
+            let zone = ZONES
+                .into_iter()
+                .find(|&zone| contains(layout.polygon(zone), point))
+                .unwrap_or_else(|| fallback_zone(point));
+            indices[zone as usize].push(index);
+        }
+
+        Ok(Self {
+            width,
+            height,
+            indices,
+        })
+    }
+
+    pub fn width(&self) -> usize {
+        self.width
+    }
+
+    pub fn height(&self) -> usize {
+        self.height
+    }
+
+    pub fn indices(&self, zone: Zone) -> &[usize] {
+        &self.indices[zone as usize]
+    }
+
+    pub fn zone_at(&self, x: usize, y: usize) -> Zone {
+        assert!(x < self.width && y < self.height);
+        let index = y * self.width + x;
+        ZONES
+            .into_iter()
+            .find(|&zone| self.indices(zone).binary_search(&index).is_ok())
+            .expect("compiled masks cover every pixel")
+    }
+}
+
+const ZONES: [Zone; 4] = [
+    Zone::LeftRear,
+    Zone::LeftFront,
+    Zone::RightFront,
+    Zone::RightRear,
+];
+
+fn contains(polygon: &Polygon, point: Point) -> bool {
+    let vertices = polygon.vertices();
+    let mut inside = false;
+    let mut previous = vertices[vertices.len() - 1];
+
+    for &current in vertices {
+        if (current.y > point.y) != (previous.y > point.y)
+            && point.x
+                < (previous.x - current.x) * (point.y - current.y) / (previous.y - current.y)
+                    + current.x
+        {
+            inside = !inside;
+        }
+        previous = current;
+    }
+
+    inside
+}
+
+fn fallback_zone(point: Point) -> Zone {
+    let left_boundary = if point.y <= 0.70 {
+        0.50 + (0.17 - 0.50) * (point.y / 0.70)
+    } else {
+        0.17 + (0.14 - 0.17) * ((point.y - 0.70) / 0.30)
+    };
+
+    if point.x < 0.50 {
+        if point.x < left_boundary {
+            Zone::LeftRear
+        } else {
+            Zone::LeftFront
+        }
+    } else if point.x < 1.0 - left_boundary {
+        Zone::RightFront
+    } else {
+        Zone::RightRear
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Region, RgbFrame, default_regions};
+    use crate::Zone;
+
+    use super::{Point, Polygon, RgbFrame, ZoneLayout, ZoneMasks};
+
+    const ZONES: [Zone; 4] = [
+        Zone::LeftRear,
+        Zone::LeftFront,
+        Zone::RightFront,
+        Zone::RightRear,
+    ];
+
+    fn mirrored(zone: Zone) -> Zone {
+        match zone {
+            Zone::LeftRear => Zone::RightRear,
+            Zone::LeftFront => Zone::RightFront,
+            Zone::RightFront => Zone::LeftFront,
+            Zone::RightRear => Zone::LeftRear,
+        }
+    }
+
+    fn assert_complete_disjoint_masks(width: usize, height: usize) {
+        let masks = ZoneMasks::compile(&ZoneLayout::g560_default(), width, height).unwrap();
+        let mut memberships = vec![0_u8; width * height];
+        for zone in ZONES {
+            for &index in masks.indices(zone) {
+                assert!(index < memberships.len());
+                memberships[index] += 1;
+            }
+        }
+
+        assert!(memberships.into_iter().all(|count| count == 1));
+
+        if width > 1 {
+            for y in 0..height {
+                for x in 0..width {
+                    assert_eq!(
+                        masks.zone_at(width - 1 - x, y),
+                        mirrored(masks.zone_at(x, y)),
+                        "mask is not horizontally symmetric at ({x}, {y}) for {width}x{height}"
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     fn packed_rgb_frame_rejects_wrong_byte_length() {
@@ -103,35 +269,36 @@ mod tests {
     }
 
     #[test]
-    fn normalized_regions_clamp_to_frame_boundaries() {
-        let region = Region {
-            x: -0.25,
-            y: 0.75,
-            width: 1.5,
-            height: 0.5,
-        };
-
-        assert_eq!(region.pixel_bounds(100, 80), (0, 60, 100, 80));
+    fn g560_masks_cover_each_pixel_once_at_varied_resolutions() {
+        for (width, height) in [(160, 90), (1, 1), (2, 2), (90, 160), (320, 90)] {
+            assert_complete_disjoint_masks(width, height);
+        }
     }
 
     #[test]
-    fn defaults_select_non_overlapping_edge_areas_in_zone_order() {
-        let regions = default_regions();
-        let bounds = regions.map(|region| region.pixel_bounds(100, 100));
+    fn g560_masks_assign_representative_pixels() {
+        let masks = ZoneMasks::compile(&ZoneLayout::g560_default(), 160, 90).unwrap();
 
-        assert_eq!(bounds[0], (0, 0, 25, 25));
-        assert_eq!(bounds[1], (0, 75, 25, 100));
-        assert_eq!(bounds[2], (75, 75, 100, 100));
-        assert_eq!(bounds[3], (75, 0, 100, 25));
+        assert_eq!(masks.zone_at(0, 0), Zone::LeftRear);
+        assert_eq!(masks.zone_at(159, 0), Zone::RightRear);
+        assert_eq!(masks.zone_at(80, 1), Zone::RightFront);
+        assert_eq!(masks.zone_at(79, 89), Zone::LeftFront);
+        assert_eq!(masks.zone_at(80, 89), Zone::RightFront);
+    }
 
-        for (index, first) in bounds.iter().enumerate() {
-            for second in &bounds[index + 1..] {
-                let overlaps = first.0 < second.2
-                    && second.0 < first.2
-                    && first.1 < second.3
-                    && second.1 < first.3;
-                assert!(!overlaps);
-            }
-        }
+    #[test]
+    fn polygons_require_three_finite_vertices() {
+        assert!(Polygon::new(vec![Point { x: 0.0, y: 0.0 }, Point { x: 1.0, y: 1.0 }]).is_err());
+        assert!(
+            Polygon::new(vec![
+                Point { x: 0.0, y: 0.0 },
+                Point {
+                    x: f32::NAN,
+                    y: 0.5,
+                },
+                Point { x: 1.0, y: 1.0 },
+            ])
+            .is_err()
+        );
     }
 }
