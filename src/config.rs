@@ -13,6 +13,13 @@ use serde::{Deserialize, Serialize};
 
 pub const CONFIG_VERSION: u32 = 2;
 
+const LOGICAL_ZONES: [ZoneId; 4] = [
+    ZoneId::LeftRear,
+    ZoneId::LeftFront,
+    ZoneId::RightFront,
+    ZoneId::RightRear,
+];
+
 const DEFAULT_COLOR: RgbColor = RgbColor {
     red: 0x14,
     green: 0xc8,
@@ -27,6 +34,49 @@ pub struct AppConfig {
     pub manual_zones: [ManualZone; 4],
     pub restore_token: Option<String>,
     pub setup_complete: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, thiserror::Error)]
+pub enum ConfigValidationError {
+    #[error("unsupported configuration version {actual}; expected {expected}")]
+    UnsupportedVersion { expected: u32, actual: u32 },
+    #[error("configuration must contain exactly one {zone:?} zone; found {count}")]
+    InvalidZoneCount { zone: ZoneId, count: u8 },
+    #[error("brightness {brightness} for {zone:?} is outside the range 0..=100")]
+    InvalidBrightness { zone: ZoneId, brightness: u8 },
+}
+
+impl AppConfig {
+    pub fn validate(&self) -> Result<(), ConfigValidationError> {
+        if self.version != CONFIG_VERSION {
+            return Err(ConfigValidationError::UnsupportedVersion {
+                expected: CONFIG_VERSION,
+                actual: self.version,
+            });
+        }
+
+        for zone in LOGICAL_ZONES {
+            let count = self
+                .manual_zones
+                .iter()
+                .filter(|setting| setting.zone == zone)
+                .count() as u8;
+            if count != 1 {
+                return Err(ConfigValidationError::InvalidZoneCount { zone, count });
+            }
+        }
+
+        for setting in self.manual_zones {
+            if setting.brightness > 100 {
+                return Err(ConfigValidationError::InvalidBrightness {
+                    zone: setting.zone,
+                    brightness: setting.brightness,
+                });
+            }
+        }
+
+        Ok(())
+    }
 }
 
 impl Default for AppConfig {
@@ -206,7 +256,7 @@ impl ConfigStore for FileConfigStore {
         let config = std::str::from_utf8(&contents)
             .ok()
             .and_then(|contents| toml::from_str::<AppConfig>(contents).ok())
-            .filter(|config| config.version == CONFIG_VERSION);
+            .filter(|config| config.validate().is_ok());
         match config {
             Some(config) => Ok(ConfigLoad::Loaded(config)),
             None => Ok(ConfigLoad::Recovered {
@@ -313,6 +363,69 @@ mod tests {
     }
 
     #[test]
+    fn app_config_validation_accepts_defaults() {
+        assert_eq!(AppConfig::default().validate(), Ok(()));
+    }
+
+    #[test]
+    fn app_config_validation_rejects_wrong_schema_version() {
+        let config = AppConfig {
+            version: 1,
+            ..AppConfig::default()
+        };
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigValidationError::UnsupportedVersion {
+                expected: CONFIG_VERSION,
+                actual: 1,
+            })
+        );
+    }
+
+    #[test]
+    fn app_config_validation_rejects_duplicate_logical_zone() {
+        let mut config = AppConfig::default();
+        config.manual_zones[3].zone = ZoneId::LeftRear;
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigValidationError::InvalidZoneCount {
+                zone: ZoneId::LeftRear,
+                count: 2,
+            })
+        );
+    }
+
+    #[test]
+    fn app_config_validation_rejects_missing_logical_zone() {
+        let mut config = AppConfig::default();
+        config.manual_zones[1].zone = ZoneId::RightRear;
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigValidationError::InvalidZoneCount {
+                zone: ZoneId::LeftFront,
+                count: 0,
+            })
+        );
+    }
+
+    #[test]
+    fn app_config_validation_rejects_brightness_above_one_hundred() {
+        let mut config = AppConfig::default();
+        config.manual_zones[2].brightness = 101;
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigValidationError::InvalidBrightness {
+                zone: ZoneId::RightFront,
+                brightness: 101,
+            })
+        );
+    }
+
+    #[test]
     fn save_replaces_atomically_with_mode_0600() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("config.toml");
@@ -343,6 +456,28 @@ mod tests {
         } = store.load().unwrap()
         else {
             panic!("malformed configuration should be recovered");
+        };
+
+        assert_eq!(fs::read(&invalid_path).unwrap(), invalid);
+        assert_eq!(config, AppConfig::default());
+    }
+
+    #[test]
+    fn failed_validation_preserves_exact_file_and_returns_safe_defaults() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("config.toml");
+        let mut invalid_config = AppConfig::default();
+        invalid_config.manual_zones[2].brightness = 101;
+        let invalid = toml::to_string(&invalid_config).unwrap().into_bytes();
+        fs::write(&path, &invalid).unwrap();
+        let store = FileConfigStore::new(path);
+
+        let ConfigLoad::Recovered {
+            config,
+            invalid_path,
+        } = store.load().unwrap()
+        else {
+            panic!("semantically invalid configuration should be recovered");
         };
 
         assert_eq!(fs::read(&invalid_path).unwrap(), invalid);

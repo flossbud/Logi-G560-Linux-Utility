@@ -1,6 +1,7 @@
 use crate::{
-    API_VERSION, ApiError, AppConfig, DiagnosticCounters, HealthState, LightingMode, ManualZone,
-    ManualZoneUpdate, Rgb8, ServiceSnapshot, Zone, ZoneColor, ZoneColors, validate_manual_updates,
+    API_VERSION, ApiError, AppConfig, ConfigValidationError, DiagnosticCounters, HealthState,
+    LightingMode, ManualZone, ManualZoneUpdate, Rgb8, ServiceSnapshot, Zone, ZoneColor, ZoneColors,
+    validate_manual_updates,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -26,8 +27,9 @@ pub struct ControllerModel {
 }
 
 impl ControllerModel {
-    pub fn new(config: AppConfig) -> Self {
-        Self {
+    pub fn new(config: AppConfig) -> Result<Self, ConfigValidationError> {
+        config.validate()?;
+        Ok(Self {
             config,
             confirmed_colors: ZoneColors::BLACK,
             pending: false,
@@ -45,7 +47,7 @@ impl ControllerModel {
                 capture_rate_millihertz: 0,
                 last_successful_write_age_ms: None,
             },
-        }
+        })
     }
 
     pub fn config(&self) -> &AppConfig {
@@ -146,8 +148,7 @@ impl ControllerModel {
     }
 
     pub fn record_failure(&mut self) -> ModelEffect {
-        let changed = self.pending || self.writer_health != HealthState::Failed;
-        self.pending = false;
+        let changed = self.writer_health != HealthState::Failed;
         self.writer_health = HealthState::Failed;
         self.advance_if(changed);
         ModelEffect::NoWrite
@@ -230,8 +231,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        ApiError, AppConfig, HealthState, LightingMode, ManualZoneUpdate, Rgb8, RgbColor, Zone,
-        ZoneColors, ZoneId,
+        ApiError, AppConfig, ConfigValidationError, HealthState, LightingMode, ManualZoneUpdate,
+        Rgb8, RgbColor, Zone, ZoneColors, ZoneId,
     };
 
     const CYAN: Rgb8 = Rgb8 {
@@ -274,7 +275,7 @@ mod tests {
 
     #[test]
     fn new_model_starts_black_unpending_and_with_initial_health() {
-        let model = ControllerModel::new(AppConfig::default());
+        let model = ControllerModel::new(AppConfig::default()).unwrap();
 
         let snapshot = model.snapshot();
         assert_eq!(snapshot.revision, 0);
@@ -293,8 +294,22 @@ mod tests {
     }
 
     #[test]
+    fn new_model_rejects_invalid_config_instead_of_panicking_later() {
+        let mut config = AppConfig::default();
+        config.manual_zones[3].zone = ZoneId::LeftRear;
+
+        assert_eq!(
+            ControllerModel::new(config).unwrap_err(),
+            ConfigValidationError::InvalidZoneCount {
+                zone: ZoneId::LeftRear,
+                count: 2,
+            }
+        );
+    }
+
+    #[test]
     fn grouped_update_changes_only_named_zones_atomically() {
-        let mut model = ControllerModel::new(AppConfig::default());
+        let mut model = ControllerModel::new(AppConfig::default()).unwrap();
         let effect = model
             .apply_manual_updates(&[
                 red_update(ZoneId::LeftFront),
@@ -312,7 +327,7 @@ mod tests {
 
     #[test]
     fn invalid_grouped_update_changes_nothing() {
-        let mut model = ControllerModel::new(AppConfig::default());
+        let mut model = ControllerModel::new(AppConfig::default()).unwrap();
         let before = model.snapshot();
         let duplicate = [red_update(ZoneId::LeftFront), red_update(ZoneId::LeftFront)];
 
@@ -329,7 +344,7 @@ mod tests {
             mode: LightingMode::ContentAware,
             ..AppConfig::default()
         };
-        let mut model = ControllerModel::new(config);
+        let mut model = ControllerModel::new(config).unwrap();
         let before = model.snapshot();
 
         assert_eq!(
@@ -345,7 +360,7 @@ mod tests {
             lights_enabled: false,
             ..AppConfig::default()
         };
-        let mut model = ControllerModel::new(config);
+        let mut model = ControllerModel::new(config).unwrap();
 
         assert_eq!(
             model
@@ -359,7 +374,7 @@ mod tests {
 
     #[test]
     fn lights_off_retains_mode_and_manual_state_but_targets_black() {
-        let mut model = ControllerModel::new(AppConfig::default());
+        let mut model = ControllerModel::new(AppConfig::default()).unwrap();
         let saved_mode = model.config().mode;
         let saved_manual = model.config().manual_zones;
 
@@ -376,7 +391,7 @@ mod tests {
 
     #[test]
     fn mode_switches_choose_the_required_runtime_effect() {
-        let mut model = ControllerModel::new(AppConfig::default());
+        let mut model = ControllerModel::new(AppConfig::default()).unwrap();
 
         assert_eq!(
             model.set_mode(LightingMode::ContentAware),
@@ -392,7 +407,7 @@ mod tests {
 
     #[test]
     fn no_op_mode_and_light_changes_do_not_advance_revision() {
-        let mut model = ControllerModel::new(AppConfig::default());
+        let mut model = ControllerModel::new(AppConfig::default()).unwrap();
 
         assert_eq!(model.set_mode(LightingMode::Manual), ModelEffect::NoWrite);
         assert_eq!(model.set_lights_enabled(true), ModelEffect::NoWrite);
@@ -401,7 +416,7 @@ mod tests {
 
     #[test]
     fn lights_resume_the_saved_mode() {
-        let mut manual = ControllerModel::new(AppConfig::default());
+        let mut manual = ControllerModel::new(AppConfig::default()).unwrap();
         manual.set_lights_enabled(false);
         assert_eq!(
             manual.set_lights_enabled(true),
@@ -413,7 +428,7 @@ mod tests {
             mode: LightingMode::ContentAware,
             ..AppConfig::default()
         };
-        let mut content = ControllerModel::new(content_config);
+        let mut content = ControllerModel::new(content_config).unwrap();
         assert_eq!(
             content.set_lights_enabled(true),
             ModelEffect::StartContentAware
@@ -427,7 +442,7 @@ mod tests {
             mode: LightingMode::ContentAware,
             ..AppConfig::default()
         };
-        let mut model = ControllerModel::new(config);
+        let mut model = ControllerModel::new(config).unwrap();
 
         assert_eq!(model.set_mode(LightingMode::Manual), ModelEffect::NoWrite);
         assert_eq!(model.manual_target(), ZoneColors::BLACK);
@@ -440,7 +455,7 @@ mod tests {
             lights_enabled: false,
             ..AppConfig::default()
         };
-        let mut model = ControllerModel::new(config);
+        let mut model = ControllerModel::new(config).unwrap();
 
         assert_eq!(
             model.set_mode(LightingMode::ContentAware),
@@ -452,9 +467,12 @@ mod tests {
     }
 
     #[test]
-    fn failed_write_keeps_requested_state_and_confirmed_state_unchanged() {
-        let mut model = ControllerModel::new(AppConfig::default());
-        let initial_confirmed = model.snapshot().confirmed_colors;
+    fn failed_write_keeps_requested_state_pending_and_confirmed_state_unchanged() {
+        let mut model = ControllerModel::new(AppConfig::default()).unwrap();
+        assert_eq!(
+            model.confirm_write(ZoneColors([CYAN; 4])),
+            ModelEffect::NoWrite
+        );
 
         assert_eq!(
             model
@@ -472,16 +490,25 @@ mod tests {
         assert_eq!(model.record_failure(), ModelEffect::NoWrite);
 
         let snapshot = model.snapshot();
-        assert!(!snapshot.pending);
-        assert_eq!(snapshot.confirmed_colors, initial_confirmed);
+        assert!(snapshot.pending);
+        assert_eq!(
+            snapshot.confirmed_colors,
+            Zone::ALL
+                .into_iter()
+                .map(|zone| crate::ZoneColor {
+                    zone: zone.into(),
+                    color: RgbColor::from(CYAN),
+                })
+                .collect::<Vec<_>>()
+        );
         assert_eq!(snapshot.writer_health, HealthState::Failed);
-        assert_eq!(snapshot.revision, 3);
+        assert_eq!(snapshot.revision, 4);
         assert_eq!(model.manual_target(), ZoneColors([RED; 4]));
     }
 
     #[test]
     fn only_confirmation_changes_confirmed_colors() {
-        let mut model = ControllerModel::new(AppConfig::default());
+        let mut model = ControllerModel::new(AppConfig::default()).unwrap();
         model.mark_pending();
 
         assert_eq!(

@@ -10,7 +10,9 @@ pub mod transition;
 pub mod usb;
 
 pub use color::{Rgb8, Zone, ZoneColors};
-pub use config::{AppConfig, ConfigLoad, ConfigStore, FileConfigStore, config_path};
+pub use config::{
+    AppConfig, ConfigLoad, ConfigStore, ConfigValidationError, FileConfigStore, config_path,
+};
 pub use control::{ControllerModel, ModelEffect};
 pub use engine::{
     CaptureRecoveryMetrics, CaptureRecoverySnapshot, EngineMetrics, EngineSnapshot, EngineStats,
