@@ -55,7 +55,7 @@ Start screen matching:
 ~/.cargo/bin/cargo run --release -- run
 ```
 
-The first run opens the monitor chooser. A returned restore token is atomically stored at `~/.config/logilightshow/capture.toml` with mode `0600`; later runs ask the portal to restore that same authorization. Press Ctrl-C (or send `SIGTERM`) for a clean stop and final all-zone blackout.
+The first run opens the monitor chooser. A returned restore token is atomically stored at `~/.config/logilightshow/capture.toml` with mode `0600`; later runs ask the portal to restore that same authorization. Press Ctrl-C for the verified clean-stop path and final all-zone blackout. Normal capture termination also runs the same cleanup sequence. A dedicated live `SIGTERM` hardware observation remains pending and is outside the V1 acceptance evidence.
 
 While running, the CLI prints five-second captured-FPS and rendered-update rates, cumulative dropped-frame and capture-stall counts, cumulative capture-to-write p50/p95/p99 latency, and USB/capture recovery counters. It never logs sampled colors. Capture is paced to at most 20 frames per second before DMA-BUF/OpenGL conversion. In the final fullscreen hardware run, the calibrated USB cadence delivered 18.22 complete lighting updates/s from an 18.35 FPS capture stream without queuing stale states.
 
