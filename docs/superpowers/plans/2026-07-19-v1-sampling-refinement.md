@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace rectangular screen regions with the approved four-polygon G560 layout and make every normal color change follow an interruptible 120 ms OKLab transition without weakening immediate safety blackouts.
+**Goal:** Replace rectangular screen regions with the approved four-polygon G560 layout and make every normal color change follow an interruptible 90 ms OKLab transition at a calibrated USB cadence without weakening immediate safety blackouts.
 
 **Architecture:** A normalized `ZoneLayout` compiles into resolution-specific, disjoint pixel masks consumed by the existing weighted-dominant sampler. A clock-driven transition controller sits between latest sampled targets and the USB writer, retargeting from the current interpolated state while the existing engine bypasses it for lock, stall, shutdown, and recovery blackouts.
 
@@ -13,7 +13,7 @@
 - The four default polygons cover every captured pixel exactly once with deterministic shared-boundary ownership.
 - Default normalized geometry uses apex `(0.50, 0.00)`, knees `(0.17, 0.70)` and `(0.83, 0.70)`, and bottom outer points at `x=0.14` and `x=0.86`.
 - Zone order remains `[LeftRear, LeftFront, RightFront, RightRear]` and verified USB mapping remains `[0x02, 0x00, 0x01, 0x03]`.
-- Normal target changes use a 120 ms eased OKLab transition that begins immediately and retargets from the current interpolated color.
+- Normal target changes use a 90 ms eased OKLab transition that begins immediately and retargets from the last successfully displayed hardware color.
 - Sampled targets and transition targets are latest-value only; no stale color or transition may queue.
 - Session lock, capture loss/stall, pause, shutdown, and USB recovery cleanup bypass transitions and send immediate black.
 - Capture remains single-monitor, transient, and capped at a wall-clock 20 FPS before GL conversion.
@@ -80,7 +80,7 @@ git add src/frame.rs src/lib.rs src/sampler.rs src/engine.rs tests/engine_fake.r
 git commit -m "feat: sample G560 polygon zones"
 ```
 
-### Task 2: Interruptible 120 ms OKLab transition controller
+### Task 2: Interruptible OKLab transition controller
 
 **Files:**
 - Create: `src/transition.rs`
@@ -88,27 +88,27 @@ git commit -m "feat: sample G560 polygon zones"
 - Modify: `Cargo.toml`
 
 **Interfaces:**
-- Produces: `TransitionController::new(ZoneColors, Duration)`, `retarget(ZoneColors, Instant)`, `colors_at(Instant) -> ZoneColors`, `is_complete(Instant) -> bool`, and constant `DEFAULT_TRANSITION_DURATION = 120ms`.
+- Produces: `TransitionController::new(ZoneColors, Duration)`, `retarget(ZoneColors, Instant)`, `colors_at(Instant) -> ZoneColors`, `is_complete(Instant) -> bool`, and a configurable default duration.
 
 - [ ] **Step 1: Write failing fake-time transition tests**
 
 Cover exact endpoints, perceptual midpoint, completion, and interruption:
 
 ```rust
-let mut t = TransitionController::new(BLACK, Duration::from_millis(120));
+let mut t = TransitionController::new(BLACK, Duration::from_millis(90));
 t.retarget(RED_ZONES, start);
 assert_eq!(t.colors_at(start), BLACK);
 assert_midpoint_is_between(
-    t.colors_at(start + Duration::from_millis(60)),
+    t.colors_at(start + Duration::from_millis(45)),
     BLACK,
     RED_ZONES,
 );
-assert_eq!(t.colors_at(start + Duration::from_millis(120)), RED_ZONES);
+assert_eq!(t.colors_at(start + Duration::from_millis(90)), RED_ZONES);
 
-let midway = t.colors_at(start + Duration::from_millis(60));
-t.retarget(BLUE_ZONES, start + Duration::from_millis(60));
-assert_eq!(t.colors_at(start + Duration::from_millis(60)), midway);
-assert_eq!(t.colors_at(start + Duration::from_millis(180)), BLUE_ZONES);
+let midway = t.colors_at(start + Duration::from_millis(45));
+t.retarget(BLUE_ZONES, start + Duration::from_millis(45));
+assert_eq!(t.colors_at(start + Duration::from_millis(45)), midway);
+assert_eq!(t.colors_at(start + Duration::from_millis(135)), BLUE_ZONES);
 ```
 
 Add a test distinguishing OKLab interpolation from raw sRGB interpolation and a property test proving every output channel stays in `0..=255` for arbitrary endpoints/times.
@@ -121,7 +121,7 @@ Expected: compilation fails because `transition` does not exist.
 
 - [ ] **Step 3: Implement perceptual easing and retargeting**
 
-Convert `Rgb8` sRGB values to `palette::Oklab`, interpolate all components using smoothstep `p = t*t*(3-2*t)`, convert back with clamping, and force the exact target at or after 120 ms. `retarget` first evaluates the current transition at `now`, then uses that value as the next start. It replaces the target and start time; it never stores a queue.
+Convert `Rgb8` sRGB values to `palette::Oklab`, interpolate all components using smoothstep `p = t*t*(3-2*t)`, convert back with clamping, and force the exact target at or after the configured duration. It replaces the target and start time; it never stores a queue. Engine integration retargets from the last successfully displayed hardware value.
 
 The controller is pure and does not sleep, spawn tasks, or know about USB. It represents normal visual transitions only; safety blackouts remain an engine policy.
 
@@ -150,10 +150,10 @@ git commit -m "feat: add perceptual color transitions"
 
 With paused Tokio time and a recording sink, prove:
 
-- A red target produces intermediate colors before exact red at 120 ms.
+- A red target produces intermediate colors before exact red at the configured duration.
 - A blue target arriving at 60 ms retargets from the current red interpolation and never emits the abandoned red destination.
 - Ten targets arriving while one USB write is blocked yield only the newest target after unblock.
-- Capture stall, cancellation, source error, and shutdown each make the next sink operation black without waiting 120 ms.
+- Capture stall, cancellation, source error, and shutdown each make the next sink operation black without waiting for the transition.
 - Recovery stays black until a fresh captured frame, then transitions from black toward that frame's target.
 
 - [ ] **Step 2: Run RED tests**
@@ -164,7 +164,7 @@ Expected: new transition assertions fail because sampled colors still write dire
 
 - [ ] **Step 3: Add latest-target transition scheduling**
 
-Give the single sink writer ownership of `TransitionController`. Sampled targets arrive through the existing capacity-one latest channel. The writer selects between a new target and the next hardware write opportunity; new targets retarget immediately, while actual writes remain serialized through verified USB pacing. Use wall-clock elapsed time, not a fixed number of steps, so slow USB cannot stretch a 120 ms transition indefinitely.
+Give the single sink writer ownership of `TransitionController`. Sampled targets arrive through the existing capacity-one latest channel. The writer selects between a new target and the next hardware write opportunity; new targets retarget immediately, while actual writes remain serialized through verified USB pacing. Use wall-clock elapsed time, not a fixed number of steps, so slow USB cannot stretch the configured transition indefinitely.
 
 Represent safety blackout as an out-of-band writer command with priority over normal targets. On safety command: discard the pending target, reset controller state to black, write black immediately, and acknowledge completion to teardown/recovery logic. The first fresh target after recovery transitions from black.
 
@@ -187,7 +187,7 @@ git commit -m "feat: smooth live lighting transitions"
 - Modify: `docs/hardware/quadrant-test.html`
 
 **Interfaces:**
-- Produces: documented polygon mapping, 120 ms transition behavior, measured live result, and v1 known limitations.
+- Produces: documented polygon mapping, calibrated transition behavior, measured live result, and v1 known limitations.
 
 - [ ] **Step 1: Update the deterministic visual fixture**
 
@@ -219,7 +219,7 @@ bash -n scripts/install-udev-rule.sh
 git diff --check
 ```
 
-Update README and results with exact observed values, polygon vertices, immediate-safety exception, 120 ms default, direct-scanout bridge, Fedora/Bazzite prerequisites, privacy behavior, and the user's “overreactive” feedback as resolved or as a clearly named remaining tuning concern.
+Update README and results with exact observed values, polygon vertices, immediate-safety exception, calibrated default, direct-scanout bridge, Fedora/Bazzite prerequisites, privacy behavior, and user acceptance feedback.
 
 - [ ] **Step 4: Commit**
 
@@ -228,8 +228,63 @@ git add README.md docs/hardware/milestone-1-results.md docs/hardware/quadrant-te
 git commit -m "docs: verify refined v1 screen matching"
 ```
 
+### Task 5: Calibrate USB cadence and finalize faster smoothing
+
+**Files:**
+- Modify: `src/usb/device.rs`
+- Modify: `src/main.rs`
+- Modify: `src/transition.rs`
+- Modify: `src/engine.rs`
+- Modify: `README.md`
+- Modify: `docs/hardware/milestone-1-results.md`
+- Modify: `docs/hardware/quadrant-test.html`
+
+**Interfaces:**
+- Produces: diagnostic `calibrate-pacing --delay-ms N --seconds N`, a documented calibrated `REPORT_DELAY`, and `DEFAULT_TRANSITION_DURATION = 90ms`.
+
+- [ ] **Step 1: Write failing calibration and duration tests**
+
+Add fake-transport tests proving a caller-supplied calibration delay is used between every adjacent report across API calls, invalid delays below 1 ms are rejected before USB open, transfer failures stop the calibration immediately, and final cleanup attempts all-zone black. Update transition and engine fake-time tests to assert the 45 ms midpoint and exact 90 ms endpoint. Add an easing-specific assertion at 22.5 ms so replacing smoothstep with linear time fails.
+
+- [ ] **Step 2: Run RED tests**
+
+Run: `cargo test usb:: transition:: engine::tests -- --nocapture`
+
+Expected: the calibration command/configuration and 90 ms default assertions fail.
+
+- [ ] **Step 3: Implement bounded diagnostic calibration**
+
+Keep production `G560::open()` tied to its compile-time `REPORT_DELAY`. Add a diagnostic constructor that accepts a validated delay and the existing verified transport. `calibrate-pacing` rotates four distinct colors continuously for the requested duration, prints attempted/successful report counts and the first error, always attempts paced black cleanup, and exits nonzero on any error. The diagnostic never writes configuration automatically.
+
+Test delays `18, 16, 14, 12, 10, 8, 6, 4` milliseconds in descending order for 15 seconds each while audio plays. Stop after the first failed interval; do not test shorter intervals after failure. Select the fastest error-free interval plus a 2 ms safety margin, never lower than 4 ms. Run the selected production candidate for two minutes with rotating four-zone colors and require zero USB errors, uninterrupted audio, correct zone rotation, and final black.
+
+- [ ] **Step 4: Apply the calibrated production values**
+
+Set `REPORT_DELAY` to the confirmed safe interval and `DEFAULT_TRANSITION_DURATION` to 90 ms. Re-run exact cross-call pacing, blackout, transition, latest-target, safety-preemption, and full engine tests. Update all user-facing fixture text and documentation with measured rather than planned values.
+
+- [ ] **Step 5: Run short perceptual acceptance**
+
+Run the polygon fixture fullscreen for 60 seconds. Confirm with the user that mapping remains correct, transitions are visibly smoother than the 120 ms/~9.6 updates/s baseline, response feels faster, audio is uninterrupted, lock blackout remains immediate, unlock resumes from black, and Ctrl-C ends black. Record capture/render cadence, p50/p95/p99 latency, CPU, RSS, stalls, and USB errors.
+
+- [ ] **Step 6: Verify and commit**
+
+Run:
+
+```bash
+cargo fmt --check
+cargo clippy --all-targets -- -D warnings
+cargo test --all-targets
+bash -n scripts/install-udev-rule.sh
+git diff --check
+```
+
+```bash
+git add Cargo.toml Cargo.lock src README.md docs/hardware
+git commit -m "perf: calibrate smooth lighting cadence"
+```
+
 ---
 
 ## Completion gate
 
-V1 sampling refinement is complete only when polygon coverage tests, transition retargeting tests, immediate safety-blackout tests, full automated checks, and the real-hardware A/B test all pass. Any visible snap, added dead time, wrong physical zone, fullscreen capture loss, audio interruption, or delayed safety blackout blocks completion.
+V1 sampling refinement is complete only when polygon coverage tests, transition retargeting tests, calibrated USB pacing, immediate safety-blackout tests, full automated checks, and the real-hardware A/B test all pass. Any visible snap, added dead time, wrong physical zone, fullscreen capture loss, audio interruption, USB error at the selected production interval, or delayed safety blackout blocks completion.
