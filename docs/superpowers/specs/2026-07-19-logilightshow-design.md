@@ -30,7 +30,7 @@ The capture component retains only the newest usable frame. When a new frame arr
 
 ### Sampler
 
-The sampler downsizes each frame before analysis and calculates a color independently for four configurable edge regions. The default spatial mapping is:
+The sampler downsizes each frame before analysis and calculates a color independently for four configurable polygon regions. The default spatial mapping is:
 
 | Screen region | Intended G560 zone |
 | --- | --- |
@@ -39,11 +39,17 @@ The sampler downsizes each frame before analysis and calculates a color independ
 | Lower-right edge | Right front light |
 | Upper-right edge | Right rear light |
 
-These labels are provisional until milestone 1 visually verifies the physical zone addressed by each protocol index.
+Milestone 1 hardware testing verified the USB indexes as left front `0x00`, right front `0x01`, left rear `0x02`, and right rear `0x03`.
+
+The four default polygons form a complete, non-overlapping partition of the selected monitor. They share an apex at normalized coordinate `(0.50, 0.00)`. The left and right outer knees are approximately `(0.17, 0.70)` and `(0.83, 0.70)`, and the front zones reach the bottom edge at approximately `x=0.14` and `x=0.86`. Rear zones own the outer edges and corners; front zones form inward-facing wedges that own the center and most of the lower field. Shared polygon boundaries have deterministic ownership, so every captured pixel belongs to exactly one zone.
+
+At each negotiated capture resolution, the layout is compiled into four pixel-index masks. Masks are rebuilt only when the layout or capture resolution changes. The later control panel may expose the normalized polygon vertices as draggable control points without changing the sampler interface.
 
 For each region, pixels are converted to a perceptual color representation and clustered by similarity. Very dark pixels do not distort hue selection, and tiny isolated highlights have limited influence. The strongest meaningful color cluster supplies the hue and chroma; source luminance supplies output brightness. If the region is below the configured darkness threshold, the output is true black.
 
-The default response has no temporal smoothing. An optional later setting may apply asymmetric smoothing: meaningful changes appear immediately while small fluctuations decay more gently. Minimum brightness defaults to zero, so dark scenes can turn zones fully off.
+Every normal sampled-color change uses an interruptible 120 millisecond perceptual transition. The transition begins affecting output immediately, interpolates hue and brightness in OKLab with easing, and continuously retargets to the newest sampled color. A retarget begins from the current interpolated color; previous destinations never queue. Minimum brightness remains zero, so black screen content fades fully off.
+
+Safety blackouts bypass perceptual transitions and take effect immediately. Session lock, capture loss or stall, pause, normal exit, and USB recovery cleanup must never wait for a fade to finish.
 
 The first milestone targets SDR correctness. HDR streams will be consumed using the color metadata and formats exposed by the capture stack when practical, but correct HDR-to-light mapping is not claimed until explicitly tested. Unsupported or ambiguous HDR input must degrade safely and be reported in diagnostics rather than silently claiming color accuracy.
 
@@ -77,7 +83,7 @@ The milestone 2 control panel provides:
 - A preview of the four sample regions with editable geometry.
 - Live color indicators for all four zones.
 - A login-startup preference, enabled by default.
-- Minimum-brightness and smoothing controls, both disabled by default.
+- Minimum-brightness and transition-duration controls, defaulting to zero and 120 milliseconds respectively.
 - Reset-to-defaults and concise diagnostic information.
 
 The interface must clearly distinguish these states: active, paused, waiting for speakers, waiting for monitor authorization, capture stalled, and USB interface conflict.
@@ -110,7 +116,9 @@ The first supported package target will be selected during implementation planni
 
 ### Automated tests
 
-- Unit tests cover region geometry, monitor-size changes, perceptual clustering, highlight rejection, darkness behavior, optional smoothing, configuration parsing/migration, and newest-frame-wins scheduling.
+- Unit tests cover polygon geometry, monitor-size changes, perceptual clustering, highlight rejection, darkness behavior, transitions, configuration parsing/migration, and newest-frame-wins scheduling.
+- Polygon tests prove complete single-zone pixel coverage, deterministic boundary ownership, mirror symmetry, and expected sampling from synthetic zone images.
+- Transition tests use a fake clock to verify the 60 millisecond midpoint, exact 120 millisecond completion, interruption from the current interpolated value, newest-target replacement, OKLab interpolation, and immediate safety blackout.
 - A fake capture source feeds generated and recorded test patterns through the complete sampler path.
 - A fake four-zone USB transport verifies zone ordering, write coalescing, reconnect behavior, retry limits, and shutdown blackouts without requiring hardware.
 - D-Bus integration tests cover service state and live configuration changes in milestone 2.
@@ -133,7 +141,6 @@ Milestone 2 additionally verifies installation, login startup, portal behavior, 
 
 ## Success criteria
 
-Milestone 1 succeeds when one authorized monitor drives four independently verified physical zones using weighted dominant edge colors; black regions turn fully dark; stale frames never queue; audio remains unaffected; unplug/replug recovers automatically; and measured latency and reliable update rate are documented.
+Milestone 1 succeeds when one authorized monitor drives four independently verified physical zones using the default polygon layout and weighted dominant colors; normal changes follow interruptible 120 millisecond OKLab transitions; safety blackouts remain immediate; black regions turn fully dark; stale frames and transition targets never queue; audio remains unaffected; unplug/replug recovers automatically; and measured latency and reliable update rate are documented.
 
 Milestone 2 succeeds when a nontechnical user can install the application with one administrator authorization for device access, select one monitor once, have matching resume at later logins when portal restoration is available, control the service from a clear desktop UI, and run the application without root privileges on Fedora Workstation and Bazzite.
-
