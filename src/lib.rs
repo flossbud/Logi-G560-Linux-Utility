@@ -4,6 +4,7 @@ pub mod engine;
 pub mod frame;
 pub mod latest;
 pub mod sampler;
+pub mod transition;
 pub mod usb;
 
 pub use color::{Rgb8, Zone, ZoneColors};
@@ -11,3 +12,4 @@ pub use engine::{EngineStats, FrameSource, LightSink, run_engine};
 pub use frame::{Point, Polygon, RgbFrame, ZoneLayout, ZoneMasks};
 pub use latest::{LatestReceiver, LatestSender, latest_channel};
 pub use sampler::{SamplerConfig, sample_zones};
+pub use transition::{DEFAULT_TRANSITION_DURATION, TransitionController};
