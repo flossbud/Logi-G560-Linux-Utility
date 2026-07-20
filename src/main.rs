@@ -1,24 +1,18 @@
 use std::{
-    fs::{self, OpenOptions},
-    io::{ErrorKind, Write},
-    os::unix::fs::OpenOptionsExt,
-    path::{Path, PathBuf},
     str::FromStr,
     time::{Duration, Instant},
 };
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use directories::BaseDirs;
 use logilightshow::{
-    CaptureRecoverySnapshot, EngineMetrics, EngineSnapshot, FrameSource, FrameSourceFactory,
-    LightSink, RecoveringFrameSource, RecoveringLightSink, Rgb8, SamplerConfig, ZoneColors,
-    ZoneLayout, ZoneMasks,
+    AppConfig, CaptureRecoverySnapshot, ConfigStore, EngineMetrics, EngineSnapshot,
+    FileConfigStore, FrameSource, FrameSourceFactory, LightSink, RecoveringFrameSource,
+    RecoveringLightSink, Rgb8, SamplerConfig, ZoneColors, ZoneLayout, ZoneMasks,
     capture::{CaptureError, GStreamerFrameSource, GamescopeFrameSource, PortalCapture},
-    run_engine_with_metrics, sample_zones,
+    config_path, run_engine_with_metrics, sample_zones,
     usb::{AsyncG560, G560, LibUsbTransport},
 };
-use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 
 #[derive(Parser)]
@@ -69,14 +63,6 @@ enum Command {
     /// Match Bazzite Gaming Mode through Gamescope's native PipeWire source.
     RunGaming,
 }
-
-#[derive(Debug, Default, Deserialize, Serialize)]
-struct CaptureConfig {
-    version: u32,
-    restore_token: Option<String>,
-}
-
-const CAPTURE_CONFIG_VERSION: u32 = 1;
 
 #[derive(Clone)]
 struct HexColor(Rgb8);
@@ -180,7 +166,10 @@ async fn main() -> Result<()> {
                 )
             } else {
                 let restore_token = if saved_permission {
-                    load_capture_config(&capture_config_path()?)?.restore_token
+                    FileConfigStore::new(config_path()?)
+                        .load()?
+                        .into_config()
+                        .restore_token
                 } else {
                     None
                 };
@@ -274,11 +263,11 @@ async fn main() -> Result<()> {
 }
 
 async fn run_live() -> Result<()> {
-    let config_path = capture_config_path()?;
-    let saved_restore_token = load_capture_config(&config_path)?.restore_token;
+    let config_store = FileConfigStore::new(config_path()?);
+    let config = config_store.load()?.into_config();
     let source = RecoveringFrameSource::new(PortalFrameSourceFactory {
-        config_path,
-        restore_token: saved_restore_token,
+        config_store,
+        config,
         has_opened: false,
     });
     drive_live(source).await
@@ -443,8 +432,8 @@ fn print_interval(
 }
 
 struct PortalFrameSourceFactory {
-    config_path: PathBuf,
-    restore_token: Option<String>,
+    config_store: FileConfigStore,
+    config: AppConfig,
     has_opened: bool,
 }
 
@@ -453,10 +442,9 @@ impl FrameSourceFactory for PortalFrameSourceFactory {
     type Source = GStreamerFrameSource;
 
     async fn open(&mut self) -> Result<Self::Source> {
-        let grant = PortalCapture::open(self.restore_token.clone()).await?;
+        let grant = PortalCapture::open(self.config.restore_token.clone()).await?;
         if let Some(restore_token) = grant.restore_token.as_deref() {
-            save_restore_token(&self.config_path, restore_token)?;
-            self.restore_token = Some(restore_token.to_owned());
+            save_restore_token(&self.config_store, &mut self.config, restore_token)?;
         }
         let source = GStreamerFrameSource::open(grant).await?;
         self.has_opened = true;
@@ -499,68 +487,16 @@ fn micros_to_millis(micros: u64) -> f64 {
     micros as f64 / 1_000.0
 }
 
-fn capture_config_path() -> Result<PathBuf> {
-    let base = BaseDirs::new().context("could not determine the user configuration directory")?;
-    Ok(base.config_dir().join("logilightshow/capture.toml"))
-}
-
-fn load_capture_config(path: &Path) -> Result<CaptureConfig> {
-    let contents = match fs::read_to_string(path) {
-        Ok(contents) => contents,
-        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(CaptureConfig::default()),
-        Err(error) => return Err(error).with_context(|| format!("read {}", path.display())),
-    };
-    toml::from_str(&contents).with_context(|| format!("parse {}", path.display()))
-}
-
-fn save_restore_token(path: &Path, restore_token: &str) -> Result<()> {
-    let parent = path
-        .parent()
-        .context("capture configuration path has no parent")?;
-    fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
-    let contents = toml::to_string(&CaptureConfig {
-        version: CAPTURE_CONFIG_VERSION,
-        restore_token: Some(restore_token.to_owned()),
-    })?;
-    let (temporary, mut file) = (0..100_u8)
-        .find_map(|attempt| {
-            let suffix = if attempt == 0 {
-                String::new()
-            } else {
-                format!("-{attempt}")
-            };
-            let temporary =
-                parent.join(format!(".capture.toml.tmp-{}{suffix}", std::process::id()));
-            match OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .mode(0o600)
-                .open(&temporary)
-            {
-                Ok(file) => Some(Ok((temporary, file))),
-                Err(error) if error.kind() == ErrorKind::AlreadyExists => None,
-                Err(error) => {
-                    Some(Err(error).with_context(|| format!("open {}", temporary.display())))
-                }
-            }
-        })
-        .transpose()?
-        .context("could not allocate a private temporary capture configuration file")?;
-    let write_result = (|| -> Result<()> {
-        file.write_all(contents.as_bytes())
-            .with_context(|| format!("write {}", temporary.display()))?;
-        file.sync_all()
-            .with_context(|| format!("sync {}", temporary.display()))?;
-        fs::rename(&temporary, path).with_context(|| format!("replace {}", path.display()))?;
-        fs::File::open(parent)
-            .and_then(|directory| directory.sync_all())
-            .with_context(|| format!("sync {}", parent.display()))?;
-        Ok(())
-    })();
-    if write_result.is_err() {
-        let _ = fs::remove_file(&temporary);
-    }
-    write_result
+fn save_restore_token<S: ConfigStore>(
+    store: &S,
+    config: &mut AppConfig,
+    restore_token: &str,
+) -> Result<()> {
+    let mut updated = config.clone();
+    updated.restore_token = Some(restore_token.to_owned());
+    store.save(&updated)?;
+    *config = updated;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -637,14 +573,17 @@ mod tests {
 
     #[test]
     fn restore_token_is_atomically_saved_with_private_permissions() {
+        use std::fs;
         use std::os::unix::fs::PermissionsExt;
 
         let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("nested/capture.toml");
-        save_restore_token(&path, "private-token").unwrap();
+        let path = directory.path().join("nested/config.toml");
+        let store = FileConfigStore::new(path.clone());
+        let mut config = AppConfig::default();
+        save_restore_token(&store, &mut config, "private-token").unwrap();
 
-        let config = load_capture_config(&path).unwrap();
-        assert_eq!(config.version, CAPTURE_CONFIG_VERSION);
+        let config = store.load().unwrap().into_config();
+        assert_eq!(config.version, 2);
         assert_eq!(config.restore_token.as_deref(), Some("private-token"));
         assert_eq!(
             fs::metadata(&path).unwrap().permissions().mode() & 0o777,
@@ -655,12 +594,13 @@ mod tests {
 
     #[test]
     fn stale_temporary_file_cannot_weaken_restore_token_permissions() {
+        use std::fs::{self, OpenOptions};
         use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 
         let directory = tempfile::tempdir().unwrap();
         let parent = directory.path().join("nested");
         fs::create_dir_all(&parent).unwrap();
-        let stale = parent.join(format!(".capture.toml.tmp-{}", std::process::id()));
+        let stale = parent.join(format!(".config.toml.tmp-{}", std::process::id()));
         OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -668,9 +608,11 @@ mod tests {
             .open(&stale)
             .unwrap();
         fs::set_permissions(&stale, fs::Permissions::from_mode(0o644)).unwrap();
-        let path = parent.join("capture.toml");
+        let path = parent.join("config.toml");
+        let store = FileConfigStore::new(path.clone());
+        let mut config = AppConfig::default();
 
-        save_restore_token(&path, "still-private").unwrap();
+        save_restore_token(&store, &mut config, "still-private").unwrap();
 
         assert_eq!(
             fs::metadata(&path).unwrap().permissions().mode() & 0o777,
