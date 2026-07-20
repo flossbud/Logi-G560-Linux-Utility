@@ -491,7 +491,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{Arc, Mutex};
+    use std::sync::{Arc, Mutex, mpsc};
 
     use super::*;
     use crate::Rgb8;
@@ -532,6 +532,114 @@ mod tests {
         sink.blackout().await.unwrap();
         sink.write(red).await.unwrap();
         assert!(reports.lock().unwrap().len() >= 12);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn async_adapter_drops_queued_writes_when_blackout_is_requested() {
+        struct Held {
+            entered: Option<mpsc::Sender<()>>,
+            release: mpsc::Receiver<()>,
+            first: bool,
+            reports: Arc<Mutex<Vec<[u8; REPORT_LEN]>>>,
+        }
+        impl UsbTransport for Held {
+            fn write_report(&mut self, report: &[u8; REPORT_LEN]) -> Result<(), UsbError> {
+                if self.first {
+                    self.first = false;
+                    self.entered.take().unwrap().send(()).unwrap();
+                    self.release.recv().unwrap();
+                }
+                self.reports.lock().unwrap().push(*report);
+                Ok(())
+            }
+        }
+
+        let reports = Arc::new(Mutex::new(Vec::new()));
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let sink = AsyncG560::new(G560::new(Held {
+            entered: Some(entered_tx),
+            release: release_rx,
+            first: true,
+            reports: reports.clone(),
+        }));
+        let first = ZoneColors([Rgb8 { r: 1, g: 2, b: 3 }; 4]);
+        let queued_a = ZoneColors([Rgb8 { r: 4, g: 5, b: 6 }; 4]);
+        let queued_b = ZoneColors([Rgb8 { r: 7, g: 8, b: 9 }; 4]);
+        let post = ZoneColors(
+            [Rgb8 {
+                r: 10,
+                g: 11,
+                b: 12,
+            }; 4],
+        );
+        let enqueue = |tx: SyncSender<UsbCommand>, colors| async move {
+            let (s, r) = tokio::sync::oneshot::channel();
+            tx.send(UsbCommand::Write(colors, s)).unwrap();
+            r.await.unwrap().unwrap()
+        };
+        let first_task = tokio::spawn(enqueue(sink.tx.clone(), first));
+        tokio::task::spawn_blocking(move || entered_rx.recv().unwrap())
+            .await
+            .unwrap();
+        let a = tokio::spawn(enqueue(sink.tx.clone(), queued_a));
+        let b = tokio::spawn(enqueue(sink.tx.clone(), queued_b));
+        let safety = sink.safety.clone();
+        let blackout_tx = sink.tx.clone();
+        let blackout = tokio::spawn(async move {
+            safety.store(true, Ordering::Release);
+            let (s, r) = tokio::sync::oneshot::channel();
+            blackout_tx.send(UsbCommand::Blackout(s)).unwrap();
+            r.await.unwrap().unwrap();
+        });
+        release_tx.send(()).unwrap();
+        first_task.await.unwrap();
+        a.await.unwrap();
+        b.await.unwrap();
+        blackout.await.unwrap();
+        let _post_result = enqueue(sink.tx.clone(), post).await;
+        let reports = reports.lock().unwrap();
+        assert_eq!(reports.len(), 12);
+        assert_eq!(&reports[0][6..9], &[1, 2, 3]);
+        assert!(reports[4..8].iter().all(|r| r[6..9] == [0, 0, 0]));
+        assert!(reports[8..].iter().all(|r| r[6..9] == [10, 11, 12]));
+    }
+
+    #[tokio::test]
+    async fn async_blackout_waits_only_for_bounded_in_flight_transfer() {
+        struct TimeoutTransport {
+            first: bool,
+        }
+        impl UsbTransport for TimeoutTransport {
+            fn write_report(&mut self, _report: &[u8; REPORT_LEN]) -> Result<(), UsbError> {
+                if self.first {
+                    self.first = false;
+                    // Mirrors LibUsbTransport's 100 ms synchronous control-transfer timeout.
+                    // A synchronous syscall cannot be preempted by the async caller; blackout
+                    // therefore completes once this bounded operation returns.
+                    std::thread::sleep(Duration::from_millis(100));
+                }
+                Ok(())
+            }
+        }
+        let sink = AsyncG560::new(G560::new(TimeoutTransport { first: true }));
+        let (s1, r1) = tokio::sync::oneshot::channel();
+        sink.tx
+            .send(UsbCommand::Write(
+                ZoneColors([Rgb8 { r: 1, g: 2, b: 3 }; 4]),
+                s1,
+            ))
+            .unwrap();
+        tokio::task::yield_now().await;
+        let started = std::time::Instant::now();
+        // The worker is occupied by the first report; blackout waits for that transfer,
+        // but must not wait indefinitely.
+        sink.safety.store(true, Ordering::Release);
+        let (s2, r2) = tokio::sync::oneshot::channel();
+        sink.tx.send(UsbCommand::Blackout(s2)).unwrap();
+        r1.await.unwrap().unwrap();
+        r2.await.unwrap().unwrap();
+        assert!(started.elapsed() < Duration::from_millis(250));
     }
 
     struct FakeTransport(Arc<Mutex<Vec<[u8; REPORT_LEN]>>>);
