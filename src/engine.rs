@@ -42,6 +42,34 @@ struct SampledUpdate {
     colors: ZoneColors,
 }
 
+#[derive(Default)]
+struct ZoneMaskCache {
+    current: Option<Arc<ZoneMasks>>,
+}
+
+impl ZoneMaskCache {
+    fn get_or_compile(
+        &mut self,
+        layout: &ZoneLayout,
+        width: usize,
+        height: usize,
+    ) -> Result<Arc<ZoneMasks>> {
+        let dimensions_changed = self
+            .current
+            .as_ref()
+            .is_none_or(|masks| masks.width() != width || masks.height() != height);
+        if dimensions_changed {
+            self.current = Some(Arc::new(ZoneMasks::compile(layout, width, height)?));
+        }
+
+        Ok(self
+            .current
+            .as_ref()
+            .expect("the requested dimensions have compiled masks")
+            .clone())
+    }
+}
+
 pub async fn run_engine<S, L, C>(
     source: S,
     sink: L,
@@ -162,7 +190,7 @@ where
     let sampler = Arc::new(sampler);
     let mut sampled_replacements = 0_u64;
     let mut sampling_error = None;
-    let mut masks = None::<Arc<ZoneMasks>>;
+    let mut mask_cache = ZoneMaskCache::default();
     let mut cancel = cancel_receiver;
     'sampling: loop {
         let captured = tokio::select! {
@@ -179,23 +207,14 @@ where
         };
         let Some(captured) = captured else { break };
         let CapturedFrame { captured_at, frame } = captured;
-        let dimensions_changed = masks
-            .as_ref()
-            .is_none_or(|masks| masks.width() != frame.width || masks.height() != frame.height);
-        if dimensions_changed {
-            match ZoneMasks::compile(&layout, frame.width, frame.height) {
-                Ok(compiled) => masks = Some(Arc::new(compiled)),
-                Err(error) => {
-                    sampling_error = Some(error.context("zone mask compilation failed"));
-                    let _ = cancel_sender.send(true);
-                    break;
-                }
+        let masks = match mask_cache.get_or_compile(&layout, frame.width, frame.height) {
+            Ok(masks) => masks,
+            Err(error) => {
+                sampling_error = Some(error.context("zone mask compilation failed"));
+                let _ = cancel_sender.send(true);
+                break;
             }
-        }
-        let masks = masks
-            .as_ref()
-            .expect("the current frame has compiled masks")
-            .clone();
+        };
         let sampler = sampler.clone();
         let sample = tokio::task::spawn_blocking(move || sampler(&frame, &masks, config));
         tokio::pin!(sample);
@@ -274,7 +293,7 @@ mod tests {
 
     use tokio::sync::Notify;
 
-    use super::{FrameSource, LightSink, run_engine_with_sampler};
+    use super::{FrameSource, LightSink, ZoneMaskCache, run_engine_with_sampler};
     use crate::{Rgb8, RgbFrame, SamplerConfig, ZoneColors, ZoneLayout, ZoneMasks};
 
     fn frame(value: u8) -> RgbFrame {
@@ -283,6 +302,24 @@ mod tests {
 
     fn layout() -> ZoneLayout {
         ZoneLayout::g560_default()
+    }
+
+    #[test]
+    fn mask_cache_reuses_dimensions_and_rebuilds_on_either_dimension_change() {
+        let layout = layout();
+        let mut cache = ZoneMaskCache::default();
+
+        let initial = cache.get_or_compile(&layout, 160, 90).unwrap();
+        let same = cache.get_or_compile(&layout, 160, 90).unwrap();
+        assert!(Arc::ptr_eq(&initial, &same));
+
+        let width_changed = cache.get_or_compile(&layout, 161, 90).unwrap();
+        assert!(!Arc::ptr_eq(&same, &width_changed));
+        let same_new_width = cache.get_or_compile(&layout, 161, 90).unwrap();
+        assert!(Arc::ptr_eq(&width_changed, &same_new_width));
+
+        let height_changed = cache.get_or_compile(&layout, 161, 91).unwrap();
+        assert!(!Arc::ptr_eq(&same_new_width, &height_changed));
     }
 
     struct TestSource {
