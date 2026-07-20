@@ -47,7 +47,9 @@ At each negotiated capture resolution, the layout is compiled into four pixel-in
 
 For each region, pixels are converted to a perceptual color representation and clustered by similarity. Very dark pixels do not distort hue selection, and tiny isolated highlights have limited influence. The strongest meaningful color cluster supplies the hue and chroma; source luminance supplies output brightness. If the region is below the configured darkness threshold, the output is true black.
 
-Every normal sampled-color change uses an interruptible 120 millisecond perceptual transition. The transition begins affecting output immediately, interpolates hue and brightness in OKLab with easing, and continuously retargets to the newest sampled color. A retarget begins from the current interpolated color; previous destinations never queue. Minimum brightness remains zero, so black screen content fades fully off.
+Every normal sampled-color change uses an interruptible 90 millisecond perceptual transition. The transition begins affecting output immediately, interpolates hue and brightness in OKLab with easing, and continuously retargets to the newest sampled color. A retarget begins from the last color successfully displayed by the hardware; previous destinations never queue. Minimum brightness remains zero, so black screen content fades fully off.
+
+The USB inter-report interval is a measured hardware parameter rather than a permanently conservative constant. Development calibration tests progressively shorter intervals with sustained four-zone changes while audio plays, stops at the first transfer error, and selects the fastest stable interval with a safety margin. The selected interval must pass a longer confirmation soak before becoming the v1 default. Increasing real hardware update cadence—not merely changing the easing curve—is what allows the transition to become both smoother and faster.
 
 Safety blackouts bypass perceptual transitions and take effect immediately. Session lock, capture loss or stall, pause, normal exit, and USB recovery cleanup must never wait for a fade to finish.
 
@@ -83,7 +85,7 @@ The milestone 2 control panel provides:
 - A preview of the four sample regions with editable geometry.
 - Live color indicators for all four zones.
 - A login-startup preference, enabled by default.
-- Minimum-brightness and transition-duration controls, defaulting to zero and 120 milliseconds respectively.
+- Minimum-brightness and transition-duration controls, defaulting to zero and 90 milliseconds respectively.
 - Reset-to-defaults and concise diagnostic information.
 
 The interface must clearly distinguish these states: active, paused, waiting for speakers, waiting for monitor authorization, capture stalled, and USB interface conflict.
@@ -118,7 +120,8 @@ The first supported package target will be selected during implementation planni
 
 - Unit tests cover polygon geometry, monitor-size changes, perceptual clustering, highlight rejection, darkness behavior, transitions, configuration parsing/migration, and newest-frame-wins scheduling.
 - Polygon tests prove complete single-zone pixel coverage, deterministic boundary ownership, mirror symmetry, and expected sampling from synthetic zone images.
-- Transition tests use a fake clock to verify the 60 millisecond midpoint, exact 120 millisecond completion, interruption from the current interpolated value, newest-target replacement, OKLab interpolation, and immediate safety blackout.
+- Transition tests use a fake clock to verify the 45 millisecond midpoint, exact 90 millisecond completion, interruption from the last successfully displayed value, newest-target replacement, OKLab interpolation, and immediate safety blackout.
+- USB calibration tests verify cross-call pacing at the selected interval, failure detection at an unstable interval, the configured safety margin, and a sustained real-hardware confirmation with uninterrupted audio.
 - A fake capture source feeds generated and recorded test patterns through the complete sampler path.
 - A fake four-zone USB transport verifies zone ordering, write coalescing, reconnect behavior, retry limits, and shutdown blackouts without requiring hardware.
 - D-Bus integration tests cover service state and live configuration changes in milestone 2.
@@ -141,6 +144,6 @@ Milestone 2 additionally verifies installation, login startup, portal behavior, 
 
 ## Success criteria
 
-Milestone 1 succeeds when one authorized monitor drives four independently verified physical zones using the default polygon layout and weighted dominant colors; normal changes follow interruptible 120 millisecond OKLab transitions; safety blackouts remain immediate; black regions turn fully dark; stale frames and transition targets never queue; audio remains unaffected; unplug/replug recovers automatically; and measured latency and reliable update rate are documented.
+Milestone 1 succeeds when one authorized monitor drives four independently verified physical zones using the default polygon layout and weighted dominant colors; normal changes follow interruptible 90 millisecond OKLab transitions at a calibrated hardware-safe update cadence; safety blackouts remain immediate; black regions turn fully dark; stale frames and transition targets never queue; audio remains unaffected; unplug/replug recovers automatically; and measured latency and reliable update rate are documented. The user must confirm that transitions are visibly smooth and do not feel delayed.
 
 Milestone 2 succeeds when a nontechnical user can install the application with one administrator authorization for device access, select one monitor once, have matching resume at later logins when portal restoration is available, control the service from a clear desktop UI, and run the application without root privileges on Fedora Workstation and Bazzite.
