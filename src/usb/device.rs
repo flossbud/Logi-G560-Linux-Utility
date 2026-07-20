@@ -524,6 +524,17 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn async_adapter_writes_before_and_after_blackout() {
+        let reports = Arc::new(Mutex::new(Vec::new()));
+        let mut sink = AsyncG560::new(G560::new(FakeTransport(reports.clone())));
+        let red = ZoneColors([Rgb8 { r: 255, g: 0, b: 0 }; 4]);
+        sink.write(red).await.unwrap();
+        sink.blackout().await.unwrap();
+        sink.write(red).await.unwrap();
+        assert!(reports.lock().unwrap().len() >= 12);
+    }
+
     struct FakeTransport(Arc<Mutex<Vec<[u8; REPORT_LEN]>>>);
 
     impl UsbTransport for FakeTransport {
