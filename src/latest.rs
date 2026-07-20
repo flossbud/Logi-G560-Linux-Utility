@@ -48,6 +48,16 @@ impl<T> LatestSender<T> {
 }
 
 impl<T: Clone> LatestReceiver<T> {
+    pub fn try_recv(&mut self) -> Option<T> {
+        let mut state = self.state.lock().expect("latest channel lock poisoned");
+        if !state.unread {
+            return None;
+        }
+        let value = self.inner.borrow_and_update().clone();
+        state.unread = false;
+        value
+    }
+
     pub async fn recv(&mut self) -> Option<T> {
         loop {
             if self.inner.changed().await.is_err() {

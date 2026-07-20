@@ -12,8 +12,8 @@ use tokio::sync::{mpsc, oneshot, watch};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    DEFAULT_TRANSITION_DURATION, RgbFrame, SamplerConfig, TransitionController, ZoneColors,
-    ZoneLayout, ZoneMasks, latest_channel, sampler::sample_zones,
+    DEFAULT_TRANSITION_DURATION, LatestReceiver, RgbFrame, SamplerConfig, TransitionController,
+    ZoneColors, ZoneLayout, ZoneMasks, latest_channel, sampler::sample_zones,
 };
 
 #[async_trait::async_trait]
@@ -64,6 +64,7 @@ const INITIAL_RETRY_DELAY: Duration = Duration::from_millis(250);
 const MAX_RETRY_DELAY: Duration = Duration::from_secs(5);
 const MAX_CONSECUTIVE_WRITE_FAILURES: usize = 3;
 const LIGHT_UPDATE_INTERVAL: Duration = Duration::from_millis(20);
+const SAFETY_BLACKOUT_TIMEOUT: Duration = Duration::from_secs(1);
 
 #[derive(Debug, thiserror::Error)]
 #[error("recovery cancelled")]
@@ -500,35 +501,152 @@ impl EngineMetrics {
 struct CapturedFrame {
     captured_at: Instant,
     frame: RgbFrame,
+    capture_generation: u64,
 }
 
 #[derive(Clone)]
 struct SampledUpdate {
     captured_at: Instant,
     colors: ZoneColors,
-    safety_epoch: u64,
+    capture_generation: u64,
 }
 
 struct SafetyBlackout {
-    safety_epoch: u64,
+    resume_generation: u64,
     acknowledged: oneshot::Sender<std::result::Result<(), String>>,
+}
+
+struct LightingWriterState {
+    displayed: ZoneColors,
+    transition: TransitionController,
+    transition_active: bool,
+    current_update: Option<SampledUpdate>,
+    current_update_rendered: bool,
+    accepted_generation: u64,
+    next_write: Option<tokio::time::Instant>,
+}
+
+impl LightingWriterState {
+    fn new() -> Self {
+        Self {
+            displayed: ZoneColors::BLACK,
+            transition: TransitionController::new(ZoneColors::BLACK, DEFAULT_TRANSITION_DURATION),
+            transition_active: false,
+            current_update: None,
+            current_update_rendered: false,
+            accepted_generation: 0,
+            next_write: None,
+        }
+    }
+
+    /// Accepts a current-generation update and reports whether it displaced
+    /// an update that had never reached the hardware.
+    fn accept_update(
+        &mut self,
+        update: SampledUpdate,
+        now: tokio::time::Instant,
+        preserve_write_deadline: bool,
+    ) -> Option<bool> {
+        if update.capture_generation != self.accepted_generation {
+            return None;
+        }
+        let dropped_unrendered = self.current_update.is_some() && !self.current_update_rendered;
+        self.transition = TransitionController::new(self.displayed, DEFAULT_TRANSITION_DURATION);
+        self.transition.retarget(update.colors, now.into_std());
+        self.current_update = Some(update);
+        self.current_update_rendered = false;
+        self.transition_active = true;
+        if !preserve_write_deadline || self.next_write.is_none() {
+            self.next_write = Some(now + LIGHT_UPDATE_INTERVAL);
+        }
+        Some(dropped_unrendered)
+    }
+
+    fn prepare_safety(&mut self, resume_generation: u64) -> bool {
+        let dropped_unrendered = self.current_update.is_some() && !self.current_update_rendered;
+        self.accepted_generation = resume_generation;
+        self.current_update = None;
+        self.current_update_rendered = false;
+        self.transition = TransitionController::new(ZoneColors::BLACK, DEFAULT_TRANSITION_DURATION);
+        self.transition_active = false;
+        self.next_write = None;
+        dropped_unrendered
+    }
+
+    fn mark_displayed(&mut self, colors: ZoneColors) {
+        self.displayed = colors;
+        self.current_update_rendered = true;
+    }
+
+    fn clear_as_dropped(&mut self) -> bool {
+        let dropped_unrendered = self.current_update.is_some() && !self.current_update_rendered;
+        self.current_update = None;
+        self.current_update_rendered = false;
+        self.transition_active = false;
+        self.next_write = None;
+        dropped_unrendered
+    }
 }
 
 async fn request_safety_blackout(
     sender: &mpsc::UnboundedSender<SafetyBlackout>,
-    safety_epoch: u64,
+    capture_generation: &AtomicU64,
 ) -> Result<()> {
+    let previous_generation = capture_generation
+        .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |generation| {
+            Some(if generation % 2 == 0 {
+                generation.wrapping_add(1)
+            } else {
+                generation
+            })
+        })
+        .expect("capture generation update is infallible");
+    let blackout_generation = if previous_generation % 2 == 0 {
+        previous_generation.wrapping_add(1)
+    } else {
+        previous_generation
+    };
+    debug_assert_eq!(blackout_generation % 2, 1);
+    let resume_generation = blackout_generation.wrapping_add(1);
     let (acknowledged, completion) = oneshot::channel();
     sender
         .send(SafetyBlackout {
-            safety_epoch,
+            resume_generation,
             acknowledged,
         })
         .map_err(|_| anyhow!("lighting writer stopped before safety blackout"))?;
-    completion
+    let result = completion
         .await
         .map_err(|_| anyhow!("lighting writer stopped before acknowledging safety blackout"))?
-        .map_err(|error| anyhow!(error))
+        .map_err(|error| anyhow!(error));
+    if result.is_ok() {
+        capture_generation.store(resume_generation, Ordering::SeqCst);
+    }
+    result
+}
+
+enum WriterWake {
+    Safety(Option<SafetyBlackout>),
+    WriteDeadline,
+    Update(Option<SampledUpdate>),
+}
+
+async fn next_writer_wake(
+    safety_receiver: &mut mpsc::UnboundedReceiver<SafetyBlackout>,
+    safety_open: bool,
+    update_receiver: &mut LatestReceiver<SampledUpdate>,
+    updates_open: bool,
+    next_write: Option<tokio::time::Instant>,
+) -> WriterWake {
+    let deadline = next_write.unwrap_or_else(tokio::time::Instant::now);
+    tokio::select! {
+        biased;
+        command = safety_receiver.recv(), if safety_open => WriterWake::Safety(command),
+        () = tokio::time::sleep_until(deadline), if next_write.is_some() => {
+            WriterWake::WriteDeadline
+        }
+        update = update_receiver.recv(), if updates_open => WriterWake::Update(update),
+    }
 }
 
 #[derive(Default)]
@@ -652,6 +770,8 @@ where
 {
     let (cancel_sender, cancel_receiver) = watch::channel(false);
     let (frame_sender, mut frame_receiver) = latest_channel::<CapturedFrame>();
+    let capture_generation = Arc::new(AtomicU64::new(0));
+    let capture_task_generation = capture_generation.clone();
     let capture_cancel = cancel_receiver.clone();
     let capture_cancel_sender = cancel_sender.clone();
     let capture_metrics = metrics.clone();
@@ -674,6 +794,7 @@ where
                     match frame_sender.send(CapturedFrame {
                         captured_at: Instant::now(),
                         frame,
+                        capture_generation: capture_task_generation.load(Ordering::SeqCst),
                     }) {
                         Ok(replaced) => {
                             replacements += u64::from(replaced);
@@ -715,84 +836,120 @@ where
         let mut stale_updates = 0_u64;
         let mut histogram = hdrhistogram::Histogram::<u64>::new(3)?;
         let mut write_error = None;
-        let mut transition =
-            TransitionController::new(ZoneColors::BLACK, DEFAULT_TRANSITION_DURATION);
-        let mut transition_active = false;
-        let mut current_update = None::<SampledUpdate>;
-        let mut safety_epoch = 0_u64;
-        let mut next_write = None::<tokio::time::Instant>;
+        let mut state = LightingWriterState::new();
         let mut updates_open = true;
         let mut safety_open = true;
+        let mut pending_safety = None::<SafetyBlackout>;
 
-        while updates_open || safety_open || transition_active {
-            let deadline = next_write.unwrap_or_else(tokio::time::Instant::now);
-            tokio::select! {
-                biased;
-                command = safety_receiver.recv(), if safety_open => {
-                    let Some(command) = command else {
-                        safety_open = false;
-                        continue;
-                    };
-                    safety_epoch = safety_epoch.max(command.safety_epoch);
-                    current_update = None;
-                    transition = TransitionController::new(
-                        ZoneColors::BLACK,
-                        DEFAULT_TRANSITION_DURATION,
-                    );
-                    transition_active = false;
-                    next_write = None;
-                    match sink.blackout().await {
-                        Ok(()) => {
-                            let _ = command.acknowledged.send(Ok(()));
-                        }
-                        Err(error) => {
-                            let summary = format!("{error:#}");
-                            let _ = command.acknowledged.send(Err(summary));
-                            write_error = Some(error.context("blackout failed"));
-                            let _ = writer_cancel_sender.send(true);
-                            break;
-                        }
+        'writer: while updates_open || safety_open || state.transition_active {
+            if let Some(command) = pending_safety.take() {
+                if state.prepare_safety(command.resume_generation) {
+                    stale_updates += 1;
+                    writer_metrics.dropped();
+                }
+                let blackout = tokio::time::timeout(SAFETY_BLACKOUT_TIMEOUT, sink.blackout()).await;
+                match blackout {
+                    Ok(Ok(())) => {
+                        state.displayed = ZoneColors::BLACK;
+                        let _ = command.acknowledged.send(Ok(()));
+                    }
+                    Ok(Err(error)) => {
+                        let summary = format!("{error:#}");
+                        let _ = command.acknowledged.send(Err(summary));
+                        write_error = Some(error.context("blackout failed"));
+                        let _ = writer_cancel_sender.send(true);
+                        break;
+                    }
+                    Err(_) => {
+                        let error = anyhow!(
+                            "blackout timed out after {} ms",
+                            SAFETY_BLACKOUT_TIMEOUT.as_millis()
+                        );
+                        let _ = command.acknowledged.send(Err(error.to_string()));
+                        write_error = Some(error);
+                        let _ = writer_cancel_sender.send(true);
+                        break;
                     }
                 }
-                update = update_receiver.recv(), if updates_open => {
+                continue;
+            }
+
+            match next_writer_wake(
+                &mut safety_receiver,
+                safety_open,
+                &mut update_receiver,
+                updates_open,
+                state.next_write,
+            )
+            .await
+            {
+                WriterWake::Safety(command) => match command {
+                    Some(command) => pending_safety = Some(command),
+                    None => safety_open = false,
+                },
+                WriterWake::Update(update) => {
                     let Some(update) = update else {
                         updates_open = false;
                         continue;
                     };
-                    if update.safety_epoch < safety_epoch {
-                        stale_updates += 1;
-                        writer_metrics.dropped();
-                        continue;
+                    match state.accept_update(update, tokio::time::Instant::now(), true) {
+                        Some(true) => {
+                            stale_updates += 1;
+                            writer_metrics.dropped();
+                        }
+                        Some(false) => {}
+                        None => {
+                            stale_updates += 1;
+                            writer_metrics.dropped();
+                        }
                     }
-                    if update.safety_epoch > safety_epoch {
-                        stale_updates += 1;
-                        writer_metrics.dropped();
-                        continue;
-                    }
-                    let now = tokio::time::Instant::now();
-                    transition.retarget(update.colors, now.into_std());
-                    current_update = Some(update);
-                    transition_active = true;
-                    next_write.get_or_insert(now + LIGHT_UPDATE_INTERVAL);
                 }
-                () = tokio::time::sleep_until(deadline), if next_write.is_some() => {
+                WriterWake::WriteDeadline => {
                     let now = tokio::time::Instant::now();
-                    let Some(update) = current_update.as_ref() else {
-                        transition_active = false;
-                        next_write = None;
+                    let Some(update) = state.current_update.as_ref() else {
+                        state.transition_active = false;
+                        state.next_write = None;
                         continue;
                     };
-                    let colors = transition.colors_at(now.into_std());
-                    let wrote_final_target = transition.is_complete(now.into_std());
-                    match sink.write_update(colors, update.captured_at).await {
+                    let captured_at = update.captured_at;
+                    let colors = state.transition.colors_at(now.into_std());
+                    let wrote_final_target = state.transition.is_complete(now.into_std());
+                    let write_result = {
+                        let write = sink.write_update(colors, captured_at);
+                        tokio::pin!(write);
+                        loop {
+                            tokio::select! {
+                                biased;
+                                command = safety_receiver.recv(), if safety_open => {
+                                    match command {
+                                        Some(command) => break Err(command),
+                                        None => {
+                                            safety_open = false;
+                                            continue;
+                                        }
+                                    }
+                                }
+                                result = &mut write => break Ok(result),
+                            }
+                        }
+                    };
+                    let write_result = match write_result {
+                        Ok(result) => result,
+                        Err(command) => {
+                            pending_safety = Some(command);
+                            continue 'writer;
+                        }
+                    };
+                    match write_result {
                         Ok(LightUpdateStatus::Rendered) => {
+                            state.mark_displayed(colors);
                             rendered += 1;
-                            let micros = u64::try_from(update.captured_at.elapsed().as_micros())
+                            let micros = u64::try_from(captured_at.elapsed().as_micros())
                                 .unwrap_or(u64::MAX)
                                 .max(1);
                             if let Err(error) = histogram.record(micros) {
                                 write_error = Some(
-                                    anyhow::Error::new(error).context("latency record failed")
+                                    anyhow::Error::new(error).context("latency record failed"),
                                 );
                                 let _ = writer_cancel_sender.send(true);
                                 break;
@@ -803,23 +960,21 @@ where
                                 break;
                             }
                         }
-                        Ok(LightUpdateStatus::Unchanged) => {}
+                        Ok(LightUpdateStatus::Unchanged) => state.mark_displayed(colors),
                         Ok(LightUpdateStatus::Expired) => {
                             stale_updates += 1;
                             writer_metrics.dropped();
-                            current_update = None;
-                            transition = TransitionController::new(
-                                ZoneColors::BLACK,
-                                DEFAULT_TRANSITION_DURATION,
-                            );
-                            transition_active = false;
-                            next_write = None;
-                            continue;
+                            state.displayed = ZoneColors::BLACK;
+                            state.current_update = None;
+                            state.current_update_rendered = false;
+                            state.transition_active = false;
+                            state.next_write = None;
                         }
                         Err(error) if error.downcast_ref::<RecoveryCancelled>().is_some() => {
-                            current_update = None;
-                            transition_active = false;
-                            next_write = None;
+                            if state.clear_as_dropped() {
+                                stale_updates += 1;
+                                writer_metrics.dropped();
+                            }
                             continue;
                         }
                         Err(error) => {
@@ -828,15 +983,30 @@ where
                             break;
                         }
                     }
+
                     let write_finished_at = tokio::time::Instant::now();
-                    transition_active = !wrote_final_target;
-                    next_write = transition_active.then(|| {
-                        if transition.is_complete(write_finished_at.into_std()) {
-                            write_finished_at
-                        } else {
-                            write_finished_at + LIGHT_UPDATE_INTERVAL
+                    if let Some(update) = update_receiver.try_recv() {
+                        match state.accept_update(update, write_finished_at, false) {
+                            Some(true) => {
+                                stale_updates += 1;
+                                writer_metrics.dropped();
+                            }
+                            Some(false) => {}
+                            None => {
+                                stale_updates += 1;
+                                writer_metrics.dropped();
+                            }
                         }
-                    });
+                    } else if state.current_update.is_some() {
+                        state.transition_active = !wrote_final_target;
+                        state.next_write = state.transition_active.then(|| {
+                            if state.transition.is_complete(write_finished_at.into_std()) {
+                                write_finished_at
+                            } else {
+                                write_finished_at + LIGHT_UPDATE_INTERVAL
+                            }
+                        });
+                    }
                 }
             }
         }
@@ -852,7 +1022,6 @@ where
     let mut sampled_replacements = 0_u64;
     let mut capture_stalls = 0_u64;
     let mut sampling_error = None;
-    let mut safety_epoch = 0_u64;
     let mut mask_cache = ZoneMaskCache::default();
     let mut cancel = cancel_receiver;
     let stall = tokio::time::sleep(CAPTURE_STALL_TIMEOUT);
@@ -873,8 +1042,9 @@ where
                 capture_stalled = true;
                 capture_stalls += 1;
                 metrics.stalled();
-                safety_epoch = safety_epoch.wrapping_add(1);
-                if let Err(error) = request_safety_blackout(&safety_sender, safety_epoch).await {
+                if let Err(error) =
+                    request_safety_blackout(&safety_sender, &capture_generation).await
+                {
                     sampling_error = Some(error.context("capture-stall blackout failed"));
                     let _ = cancel_sender.send(true);
                     break;
@@ -884,11 +1054,22 @@ where
             captured = frame_receiver.recv() => captured,
         };
         let Some(captured) = captured else { break };
+        if captured.capture_generation != capture_generation.load(Ordering::SeqCst)
+            || captured.capture_generation % 2 == 1
+        {
+            sampled_replacements += 1;
+            metrics.dropped();
+            continue;
+        }
         capture_stalled = false;
         stall
             .as_mut()
             .reset(tokio::time::Instant::now() + CAPTURE_STALL_TIMEOUT);
-        let CapturedFrame { captured_at, frame } = captured;
+        let CapturedFrame {
+            captured_at,
+            frame,
+            capture_generation: frame_generation,
+        } = captured;
         let masks = match mask_cache.get_or_compile(&layout, frame.width, frame.height) {
             Ok(masks) => masks,
             Err(error) => {
@@ -922,10 +1103,17 @@ where
         if *cancel.borrow() {
             break;
         }
+        if frame_generation != capture_generation.load(Ordering::SeqCst)
+            || frame_generation % 2 == 1
+        {
+            sampled_replacements += 1;
+            metrics.dropped();
+            continue;
+        }
         match update_sender.send(SampledUpdate {
             captured_at,
             colors,
-            safety_epoch,
+            capture_generation: frame_generation,
         }) {
             Ok(replaced) => {
                 sampled_replacements += u64::from(replaced);
@@ -939,8 +1127,7 @@ where
 
     let _ = cancel_sender.send(true);
     drop(frame_receiver);
-    safety_epoch = safety_epoch.wrapping_add(1);
-    let teardown_blackout_error = request_safety_blackout(&safety_sender, safety_epoch)
+    let teardown_blackout_error = request_safety_blackout(&safety_sender, &capture_generation)
         .await
         .context("engine teardown blackout failed")
         .err();
@@ -985,17 +1172,21 @@ mod tests {
         Arc, Condvar, Mutex,
         atomic::{AtomicUsize, Ordering},
     };
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
     use tokio::sync::{Notify, Semaphore, mpsc};
     use tokio_util::sync::CancellationToken;
 
     use super::{
         CAPTURE_STALL_TIMEOUT, EngineMetrics, FrameSource, FrameSourceFactory, LightSink,
-        LightUpdateStatus, RecoveringFrameSource, RecoveringLightSink, RetryBackoff, ZoneMaskCache,
-        run_engine_with_metrics, run_engine_with_sampler,
+        LightUpdateStatus, LightingWriterState, RecoveringFrameSource, RecoveringLightSink,
+        RetryBackoff, SAFETY_BLACKOUT_TIMEOUT, SampledUpdate, WriterWake, ZoneMaskCache,
+        next_writer_wake, run_engine_with_metrics, run_engine_with_sampler,
     };
-    use crate::{Rgb8, RgbFrame, SamplerConfig, ZoneColors, ZoneLayout, ZoneMasks};
+    use crate::{
+        DEFAULT_TRANSITION_DURATION, Rgb8, RgbFrame, SamplerConfig, TransitionController,
+        ZoneColors, ZoneLayout, ZoneMasks,
+    };
 
     fn frame(value: u8) -> RgbFrame {
         RgbFrame::new(1, 1, 3, vec![value, 0, 0]).unwrap()
@@ -1025,6 +1216,49 @@ mod tests {
 
         let height_changed = cache.get_or_compile(&layout, 161, 91).unwrap();
         assert!(!Arc::ptr_eq(&same_new_width, &height_changed));
+    }
+
+    #[test]
+    fn writer_state_reports_each_unrendered_target_replacement_once() {
+        let now = tokio::time::Instant::now();
+        let update = |red| SampledUpdate {
+            captured_at: Instant::now(),
+            colors: ZoneColors([Rgb8 { r: red, g: 0, b: 0 }; 4]),
+            capture_generation: 0,
+        };
+        let mut state = LightingWriterState::new();
+
+        assert_eq!(state.accept_update(update(10), now, true), Some(false));
+        assert_eq!(state.accept_update(update(20), now, true), Some(true));
+        state.mark_displayed(ZoneColors([Rgb8 { r: 20, g: 0, b: 0 }; 4]));
+        assert_eq!(state.accept_update(update(30), now, true), Some(false));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn due_deadlines_win_repeatedly_while_target_input_stays_ready() {
+        let (_safety_sender, mut safety_receiver) = mpsc::unbounded_channel();
+        let (update_sender, mut update_receiver) = crate::latest_channel();
+        assert!(
+            update_sender
+                .send(SampledUpdate {
+                    captured_at: Instant::now(),
+                    colors: ZoneColors([Rgb8 { r: 1, g: 0, b: 0 }; 4]),
+                    capture_generation: 0,
+                })
+                .is_ok()
+        );
+
+        for _ in 0..10 {
+            let wake = next_writer_wake(
+                &mut safety_receiver,
+                true,
+                &mut update_receiver,
+                true,
+                Some(tokio::time::Instant::now()),
+            )
+            .await;
+            assert!(matches!(wake, WriterWake::WriteDeadline));
+        }
     }
 
     struct TestSource {
@@ -1110,6 +1344,25 @@ mod tests {
         shutdowns: Arc<AtomicUsize>,
     }
 
+    struct HotSource {
+        next_red: u8,
+        shutdowns: Arc<AtomicUsize>,
+    }
+
+    #[async_trait::async_trait]
+    impl FrameSource for HotSource {
+        async fn next_frame(&mut self) -> anyhow::Result<Option<RgbFrame>> {
+            tokio::task::yield_now().await;
+            self.next_red = self.next_red.wrapping_add(1).max(1);
+            Ok(Some(frame(self.next_red)))
+        }
+
+        async fn shutdown(&mut self) -> anyhow::Result<()> {
+            self.shutdowns.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
     #[async_trait::async_trait]
     impl FrameSource for EventSource {
         async fn next_frame(&mut self) -> anyhow::Result<Option<RgbFrame>> {
@@ -1133,6 +1386,19 @@ mod tests {
         operations: Arc<Mutex<Vec<ZoneColors>>>,
         operation_started: Arc<Semaphore>,
         block_first: Option<(Arc<Notify>, Arc<Notify>)>,
+    }
+
+    struct HangingBlackoutSink;
+
+    #[async_trait::async_trait]
+    impl LightSink for HangingBlackoutSink {
+        async fn write(&mut self, _: ZoneColors) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        async fn blackout(&mut self) -> anyhow::Result<()> {
+            std::future::pending().await
+        }
     }
 
     #[async_trait::async_trait]
@@ -1276,6 +1542,53 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
+    async fn due_write_deadline_is_not_starved_by_a_hot_frame_producer() {
+        let sampled = Arc::new(AtomicUsize::new(0));
+        let shutdowns = Arc::new(AtomicUsize::new(0));
+        let (sink, operations, operation_started) = counting_sink();
+        let cancellation = CancellationToken::new();
+        let sampler_calls = sampled.clone();
+        let engine = tokio::spawn(run_engine_with_sampler(
+            HotSource {
+                next_red: 0,
+                shutdowns: shutdowns.clone(),
+            },
+            sink,
+            layout(),
+            SamplerConfig::default(),
+            cancellation.clone().cancelled_owned(),
+            move |frame, _, _| {
+                sampler_calls.fetch_add(1, Ordering::SeqCst);
+                ZoneColors(
+                    [Rgb8 {
+                        r: frame.pixels[0],
+                        g: 0,
+                        b: 0,
+                    }; 4],
+                )
+            },
+        ));
+
+        wait_for_count(&sampled, 10).await;
+        tokio::time::advance(Duration::from_millis(100)).await;
+        for _ in 0..100 {
+            tokio::task::yield_now().await;
+            if !operations.lock().unwrap().is_empty() {
+                break;
+            }
+        }
+        assert!(
+            !operations.lock().unwrap().is_empty(),
+            "a due hardware deadline must beat continuously ready sampled targets"
+        );
+        operation_started.acquire().await.unwrap().forget();
+
+        cancellation.cancel();
+        engine.await.unwrap().unwrap();
+        assert_eq!(shutdowns.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
     async fn cancellation_prioritizes_black_over_a_pending_target() {
         let (events, source, consumed, shutdowns) = event_source();
         let BlockingSinkFixture {
@@ -1286,13 +1599,16 @@ mod tests {
             release_first,
         } = blocking_sink();
         let cancellation = CancellationToken::new();
+        let sampled = Arc::new(Semaphore::new(0));
+        let sampler_signal = sampled.clone();
         let engine = tokio::spawn(run_engine_with_sampler(
             source,
             sink,
             layout(),
             SamplerConfig::default(),
             cancellation.clone().cancelled_owned(),
-            |frame, _, _| {
+            move |frame, _, _| {
+                sampler_signal.add_permits(1);
                 ZoneColors(
                     [Rgb8 {
                         r: frame.pixels[0],
@@ -1305,6 +1621,10 @@ mod tests {
 
         events.send(SourceEvent::Frame(frame(100))).unwrap();
         consumed.acquire().await.unwrap().forget();
+        sampled.acquire().await.unwrap().forget();
+        for _ in 0..4 {
+            tokio::task::yield_now().await;
+        }
         tokio::time::advance(Duration::from_millis(20)).await;
         first_started.notified().await;
         events.send(SourceEvent::Frame(frame(200))).unwrap();
@@ -1394,20 +1714,25 @@ mod tests {
             release_first,
         } = blocking_sink();
         let cancellation = CancellationToken::new();
+        let newest = Rgb8 { r: 1, g: 2, b: 253 };
+        let newest_sampled = Arc::new(Notify::new());
+        let sampler_signal = newest_sampled.clone();
         let engine = tokio::spawn(run_engine_with_sampler(
             source,
             sink,
             layout(),
             SamplerConfig::default(),
             cancellation.clone().cancelled_owned(),
-            |frame, _, _| {
-                ZoneColors(
-                    [Rgb8 {
-                        r: frame.pixels[0],
-                        g: frame.pixels[1],
-                        b: frame.pixels[2],
-                    }; 4],
-                )
+            move |frame, _, _| {
+                let color = Rgb8 {
+                    r: frame.pixels[0],
+                    g: frame.pixels[1],
+                    b: frame.pixels[2],
+                };
+                if color == newest {
+                    sampler_signal.notify_one();
+                }
+                ZoneColors([color; 4])
             },
         ));
 
@@ -1465,31 +1790,195 @@ mod tests {
         for color in abandoned {
             events.send(SourceEvent::Frame(color_frame(color))).unwrap();
         }
-        let newest = Rgb8 { r: 0, g: 0, b: 255 };
         events
             .send(SourceEvent::Frame(color_frame(newest)))
             .unwrap();
         consumed.acquire_many(10).await.unwrap().forget();
+        newest_sampled.notified().await;
         for _ in 0..8 {
             tokio::task::yield_now().await;
         }
 
+        tokio::time::advance(Duration::from_millis(60)).await;
+        let displayed_before_release = operations.lock().unwrap()[0];
+        let before_release = operations.lock().unwrap().len();
         release_first.notify_one();
         for _ in 0..4 {
             tokio::task::yield_now().await;
         }
-        let after_unblock = operations.lock().unwrap().len();
-        tokio::time::advance(Duration::from_millis(120)).await;
+        tokio::time::advance(Duration::from_millis(20)).await;
+        operation_started.acquire().await.unwrap().forget();
+        let transition_start = Instant::now();
+        let mut expected_transition =
+            TransitionController::new(displayed_before_release, DEFAULT_TRANSITION_DURATION);
+        expected_transition.retarget(ZoneColors([newest; 4]), transition_start);
+        let expected_first_step =
+            expected_transition.colors_at(transition_start + Duration::from_millis(20));
+        let writes = operations.lock().unwrap().clone();
+        assert_eq!(writes[before_release], expected_first_step);
+        for abandoned in abandoned.map(|color| ZoneColors([color; 4])) {
+            assert!(!writes[before_release..].contains(&abandoned));
+        }
+
+        tokio::time::advance(Duration::from_millis(100)).await;
         operation_started.acquire().await.unwrap().forget();
         let writes = operations.lock().unwrap().clone();
         assert_eq!(*writes.last().unwrap(), ZoneColors([newest; 4]));
         for abandoned in abandoned.map(|color| ZoneColors([color; 4])) {
-            assert!(!writes[after_unblock..].contains(&abandoned));
+            assert!(!writes[before_release..].contains(&abandoned));
         }
 
         cancellation.cancel();
         let stats = engine.await.unwrap().unwrap();
         assert!(stats.dropped_frames >= 9);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn frame_captured_during_blackout_cannot_relight_after_ack() {
+        let (events, source, consumed, _) = event_source();
+        let BlockingSinkFixture {
+            sink,
+            operations,
+            operation_started,
+            first_started,
+            release_first,
+        } = blocking_sink();
+        let sampled = Arc::new(AtomicUsize::new(0));
+        let cancellation = CancellationToken::new();
+        let sampler_calls = sampled.clone();
+        let engine = tokio::spawn(run_engine_with_sampler(
+            source,
+            sink,
+            layout(),
+            SamplerConfig::default(),
+            cancellation.clone().cancelled_owned(),
+            move |frame, _, _| {
+                sampler_calls.fetch_add(1, Ordering::SeqCst);
+                ZoneColors(
+                    [Rgb8 {
+                        r: frame.pixels[0],
+                        g: frame.pixels[1],
+                        b: frame.pixels[2],
+                    }; 4],
+                )
+            },
+        ));
+
+        tokio::time::advance(CAPTURE_STALL_TIMEOUT).await;
+        first_started.notified().await;
+        operation_started.acquire().await.unwrap().forget();
+        assert_eq!(operations.lock().unwrap()[0], ZoneColors::BLACK);
+
+        events
+            .send(SourceEvent::Frame(color_frame(Rgb8 { r: 255, g: 0, b: 0 })))
+            .unwrap();
+        consumed.acquire().await.unwrap().forget();
+        release_first.notify_one();
+        for _ in 0..50 {
+            tokio::task::yield_now().await;
+        }
+        tokio::time::advance(Duration::from_millis(20)).await;
+        for _ in 0..50 {
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(sampled.load(Ordering::SeqCst), 0);
+        assert_eq!(operations.lock().unwrap().len(), 1);
+
+        events
+            .send(SourceEvent::Frame(color_frame(Rgb8 { r: 0, g: 0, b: 255 })))
+            .unwrap();
+        consumed.acquire().await.unwrap().forget();
+        wait_for_count(&sampled, 1).await;
+        tokio::time::advance(Duration::from_millis(20)).await;
+        operation_started.acquire().await.unwrap().forget();
+        let first_recovered = *operations.lock().unwrap().last().unwrap();
+        assert_ne!(first_recovered, ZoneColors::BLACK);
+        assert_ne!(
+            first_recovered,
+            ZoneColors([Rgb8 { r: 0, g: 0, b: 255 }; 4])
+        );
+
+        cancellation.cancel();
+        engine.await.unwrap().unwrap();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn safety_preempts_an_unbounded_missing_usb_reconnect() {
+        let (events, source, consumed, shutdowns) = event_source();
+        let opens = Arc::new(AtomicUsize::new(0));
+        let factory_opens = opens.clone();
+        let sink = RecoveringLightSink::<_, RecordingSink>::new(
+            move || {
+                factory_opens.fetch_add(1, Ordering::SeqCst);
+                anyhow::bail!("fake USB remains absent")
+            },
+            CancellationToken::new(),
+        );
+        let sampled = Arc::new(Semaphore::new(0));
+        let sampler_signal = sampled.clone();
+        let engine = tokio::spawn(run_engine_with_sampler(
+            source,
+            sink,
+            layout(),
+            SamplerConfig::default(),
+            std::future::pending(),
+            move |frame, _, _| {
+                sampler_signal.add_permits(1);
+                ZoneColors(
+                    [Rgb8 {
+                        r: frame.pixels[0],
+                        g: 0,
+                        b: 0,
+                    }; 4],
+                )
+            },
+        ));
+
+        events.send(SourceEvent::Frame(frame(255))).unwrap();
+        consumed.acquire().await.unwrap().forget();
+        sampled.acquire().await.unwrap().forget();
+        for _ in 0..4 {
+            tokio::task::yield_now().await;
+        }
+        tokio::time::advance(Duration::from_millis(20)).await;
+        wait_for_count(&opens, 1).await;
+        events.send(SourceEvent::End).unwrap();
+        for _ in 0..100 {
+            tokio::task::yield_now().await;
+        }
+        assert!(
+            engine.is_finished(),
+            "safety blackout must preempt missing-device reconnect"
+        );
+        engine.await.unwrap().unwrap();
+        assert_eq!(shutdowns.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn safety_blackout_acknowledges_timeout_in_bounded_time() {
+        let cancellation = CancellationToken::new();
+        cancellation.cancel();
+        let started = tokio::time::Instant::now();
+
+        let result = run_engine_with_sampler(
+            TestSource {
+                frames: Vec::new().into_iter(),
+                error: false,
+                pending_at_end: true,
+                release_after_first: None,
+                ended: None,
+                shutdowns: None,
+            },
+            HangingBlackoutSink,
+            layout(),
+            SamplerConfig::default(),
+            cancellation.cancelled_owned(),
+            |_, _, _| ZoneColors::BLACK,
+        )
+        .await;
+
+        assert_eq!(started.elapsed(), SAFETY_BLACKOUT_TIMEOUT);
+        assert!(result.unwrap_err().to_string().contains("timed out"));
     }
 
     #[tokio::test(start_paused = true)]
@@ -1641,13 +2130,16 @@ mod tests {
             release_first,
         } = blocking_sink();
         let cancellation = CancellationToken::new();
+        let sampled = Arc::new(Semaphore::new(0));
+        let sampler_signal = sampled.clone();
         let engine = tokio::spawn(run_engine_with_sampler(
             source,
             sink,
             layout(),
             SamplerConfig::default(),
             cancellation.clone().cancelled_owned(),
-            |frame, _, _| {
+            move |frame, _, _| {
+                sampler_signal.add_permits(1);
                 ZoneColors(
                     [Rgb8 {
                         r: frame.pixels[0],
@@ -1660,11 +2152,16 @@ mod tests {
 
         events.send(SourceEvent::Frame(frame(100))).unwrap();
         consumed.acquire().await.unwrap().forget();
+        sampled.acquire().await.unwrap().forget();
+        for _ in 0..4 {
+            tokio::task::yield_now().await;
+        }
         tokio::time::advance(Duration::from_millis(20)).await;
         first_started.notified().await;
         operation_started.acquire().await.unwrap().forget();
         events.send(SourceEvent::Frame(frame(200))).unwrap();
         consumed.acquire().await.unwrap().forget();
+        sampled.acquire().await.unwrap().forget();
         tokio::time::advance(CAPTURE_STALL_TIMEOUT).await;
         tokio::task::yield_now().await;
 
@@ -2109,7 +2606,10 @@ mod tests {
         let stats = engine.await.unwrap().unwrap();
 
         assert_eq!(*sampled.lock().unwrap(), vec![1, 3]);
-        assert_eq!(stats.dropped_frames, 2);
+        assert_eq!(
+            stats.dropped_frames, 3,
+            "one capture replacement and two consumed-but-unrendered updates must be counted"
+        );
     }
 
     #[tokio::test]

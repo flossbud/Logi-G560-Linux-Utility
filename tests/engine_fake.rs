@@ -73,6 +73,17 @@ async fn latest_channel_replaces_unread_values() {
     assert_eq!(receiver.recv().await, Some(3));
 }
 
+#[tokio::test]
+async fn latest_channel_can_take_a_ready_value_without_waiting() {
+    let (sender, mut receiver) = latest_channel();
+    assert_eq!(receiver.try_recv(), None);
+    sender.send(7).unwrap();
+    sender.send(9).unwrap();
+
+    assert_eq!(receiver.try_recv(), Some(9));
+    assert_eq!(receiver.try_recv(), None);
+}
+
 #[tokio::test(start_paused = true)]
 async fn engine_writes_first_newest_and_black() {
     let writes = Arc::new(Mutex::new(Vec::new()));
