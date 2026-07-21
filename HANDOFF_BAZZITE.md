@@ -108,7 +108,6 @@ Normal sampled transitions use 90 ms per zone, except a non-black zone whose tar
 - `systemd/` — Gaming Mode user unit
 - `README.md` — user-facing usage and behavior
 - `docs/hardware/` — physical zone and Fedora acceptance evidence
-- `docs/superpowers/` and `.superpowers/` — historical design/review artifacts
 
 Before changing behavior, use the complete gate in [`docs/testing.md`](docs/testing.md). On Bazzite, run Cargo commands in the development container.
 

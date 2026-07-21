@@ -12,7 +12,7 @@ Read these documents in order before changing runtime behavior:
 4. [`docs/testing.md`](docs/testing.md) — required automated and hardware checks.
 5. The topic-specific document linked from [`docs/README.md`](docs/README.md).
 
-`README.md` is the user-facing overview. `HANDOFF_BAZZITE.md` records the machine-specific port and acceptance. Files under `docs/superpowers/` and `.superpowers/` are historical plans/reviews, not current operating instructions.
+`README.md` is the user-facing overview. `HANDOFF_BAZZITE.md` records the machine-specific port and acceptance.
 
 ## Current repository state
 

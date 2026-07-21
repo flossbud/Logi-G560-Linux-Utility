@@ -42,7 +42,6 @@ Use this page to choose the shortest path to the information you need.
 - [`hardware/g560-zone-map.md`](hardware/g560-zone-map.md) records the physically verified protocol-to-zone mapping.
 - [`hardware/milestone-1-results.md`](hardware/milestone-1-results.md) is the Fedora milestone-one acceptance record.
 - [`../HANDOFF_BAZZITE.md`](../HANDOFF_BAZZITE.md) is the Bazzite port and final prototype acceptance record.
-- `superpowers/` and `../.superpowers/` preserve historical implementation plans and reviews. They explain how the original milestone was developed but may describe superseded behavior.
 
 ## Authority order
 

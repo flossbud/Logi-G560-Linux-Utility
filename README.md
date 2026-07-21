@@ -15,7 +15,7 @@ The `run` and `run-gaming` commands now act as a persistent lighting service tha
 - [Troubleshooting](docs/troubleshooting.md)
 - [Bazzite prototype handoff](HANDOFF_BAZZITE.md)
 
-Historical design plans and Fedora milestone evidence remain under `docs/superpowers/`, `.superpowers/`, and `docs/hardware/`.
+Fedora milestone hardware evidence lives under `docs/hardware/`.
 
 ## Prerequisites
 
