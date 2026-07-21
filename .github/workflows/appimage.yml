@@ -1,0 +1,87 @@
+name: AppImage
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            libgstreamer1.0-dev \
+            libgstreamer-plugins-base1.0-dev \
+            libgstreamer-plugins-bad1.0-dev \
+            gstreamer1.0-pipewire \
+            gstreamer1.0-plugins-base \
+            gstreamer1.0-plugins-bad \
+            libpipewire-0.3-dev \
+            libusb-1.0-0-dev \
+            libgtk-3-dev \
+            libssl-dev \
+            patchelf desktop-file-utils \
+            fuse libfuse2
+
+      - name: Set up Rust (pinned by rust-toolchain.toml)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry + target
+        uses: Swatinem/rust-cache@v2
+
+      - name: fmt + clippy + test
+        run: |
+          cargo fmt --check
+          cargo clippy --all-targets -- -D warnings
+          cargo test --all-targets
+
+      - name: Build AppImage
+        run: scripts/build-appimage.sh
+
+      - name: Verify AppImage runs
+        run: |
+          ARTIFACT=$(ls dist/G560-Linux-Utility-*-x86_64.AppImage | head -n1)
+          echo "artifact: $ARTIFACT"
+          file "$ARTIFACT"
+          # AppImage type-2 runtime self-test:
+          "$ARTIFACT" --appimage-version || true
+          # CLI --version through our dispatcher:
+          "$ARTIFACT" --appimage-extract-and-run --cli --version
+
+      - name: Verify bundled libs
+        run: |
+          set -e
+          "$(ls dist/*.AppImage | head -n1)" --appimage-extract >/dev/null
+          test -f squashfs-root/usr/bin/logig560
+          test -f squashfs-root/usr/bin/logig560-gui
+          test -f squashfs-root/usr/lib/gstreamer-1.0/libgstpipewire.so
+          test -f squashfs-root/usr/share/logig560/logig560-desktop.service.in
+          test -f squashfs-root/usr/share/logig560/logig560-gaming.service.in
+          # webkit + gstreamer must resolve inside the bundle, not /usr:
+          ldd squashfs-root/usr/bin/logig560-gui | tee /tmp/gui-ldd.txt
+          if grep -E '(webkit2gtk|gstreamer-1.0).*=> /usr/' /tmp/gui-ldd.txt; then
+            echo "error: bundled libraries leaking to host /usr" >&2
+            exit 1
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: G560-Linux-Utility-x86_64.AppImage
+          path: dist/G560-Linux-Utility-*-x86_64.AppImage
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/G560-Linux-Utility-*-x86_64.AppImage
