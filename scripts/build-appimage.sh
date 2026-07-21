@@ -140,6 +140,89 @@ libgstautodetect.so"
     --plugin gtk \
     --plugin gstreamer
 
+# WebKit spawns helper processes (WebKitNetworkProcess, WebKitWebProcess,
+# WebKitGPUProcess) via a *hardcoded absolute path* baked into
+# libwebkit2gtk-4.1.so at build time (LIBEXECDIR/webkit2gtk-<API>). The
+# path only exists on the build system and cannot be overridden with an
+# env var on Ubuntu 24.04's webkit2gtk (WEBKIT_EXEC_PATH is not compiled
+# in). To make the AppImage portable we (a) bundle the helpers, (b)
+# binary-patch the hardcoded path in libwebkit2gtk-4.1.so to point at a
+# fixed short path, and (c) have AppRun symlink that path to the bundled
+# helper directory before launching.
+WEBKIT_LIBDIR=""
+for candidate in \
+    /usr/lib/x86_64-linux-gnu/webkit2gtk-4.1 \
+    /usr/lib64/webkit2gtk-4.1 \
+    /usr/lib/webkit2gtk-4.1; do
+    if [[ -d "$candidate" ]]; then
+        WEBKIT_LIBDIR="$candidate"
+        break
+    fi
+done
+if [[ -z "$WEBKIT_LIBDIR" ]]; then
+    echo "error: cannot find webkit2gtk-4.1 helper directory on host" >&2
+    exit 1
+fi
+echo ">>> Bundling WebKit helpers from $WEBKIT_LIBDIR"
+mkdir -p "$APPDIR/usr/lib/webkit2gtk-4.1"
+cp -a "$WEBKIT_LIBDIR"/. "$APPDIR/usr/lib/webkit2gtk-4.1/"
+# Rewrite rpaths on the bundled helper binaries so they find bundled libs
+# instead of falling back to host /usr/lib.
+for bin in "$APPDIR/usr/lib/webkit2gtk-4.1"/{WebKitNetworkProcess,WebKitWebProcess,WebKitGPUProcess,MiniBrowser}; do
+    [[ -f "$bin" ]] && patchelf --set-rpath '$ORIGIN/..' "$bin" || true
+done
+
+# Binary-patch libwebkit2gtk to redirect the hardcoded helper lookup path.
+# We rewrite the two occurrences of the build-system path in place with a
+# short null-padded replacement; AppRun then creates a symlink at the
+# replacement path pointing at the bundled helper dir. The replacement
+# path is fixed so it can be baked in, and short so we don't need to
+# shift any file offsets.
+echo ">>> Patching WebKit hardcoded helper paths"
+WEBKIT_SO=""
+for candidate in \
+    "$APPDIR/usr/lib/libwebkit2gtk-4.1.so.0" \
+    "$APPDIR/usr/lib/libwebkit2gtk-4.1.so"; do
+    if [[ -f "$candidate" ]]; then
+        WEBKIT_SO="$candidate"
+        break
+    fi
+done
+if [[ -z "$WEBKIT_SO" ]]; then
+    echo "error: bundled libwebkit2gtk-4.1.so not found in AppDir" >&2
+    exit 1
+fi
+python3 - "$WEBKIT_SO" <<'PY'
+import sys
+path = sys.argv[1]
+# Original strings (build-system paths, null-terminated).
+targets = [
+    b'/usr/lib/x86_64-linux-gnu/webkit2gtk-4.1\x00',                    # 41 bytes
+    b'/usr/lib/x86_64-linux-gnu/webkit2gtk-4.1/injected-bundle/\x00',   # 57 bytes
+]
+# Replacements: fixed short prefix `/tmp/.g560wk` (12 chars). AppRun
+# symlinks /tmp/.g560wk -> $HERE/usr/lib/webkit2gtk-4.1 before launch.
+# Pad each replacement to match the original length with trailing NULs
+# so no file-offset shift is needed.
+replacements = [
+    b'/tmp/.g560wk\x00',                                                # helper dir
+    b'/tmp/.g560wk/injected-bundle/\x00',                               # injected bundle
+]
+with open(path, 'rb') as f:
+    data = bytearray(f.read())
+for target, repl in zip(targets, replacements):
+    idx = data.find(target)
+    if idx < 0:
+        raise SystemExit(f'error: pattern not found: {target!r}')
+    padded = repl + b'\x00' * (len(target) - len(repl))
+    if len(padded) != len(target):
+        raise SystemExit('padding math wrong')
+    data[idx:idx + len(target)] = padded
+    print(f'  patched offset {idx}: {target[:-1].decode()} -> {repl[:-1].decode()}')
+with open(path, 'wb') as f:
+    f.write(data)
+PY
+
 echo ">>> Overwriting AppRun with our dispatcher"
 cat > "$APPDIR/AppRun" <<'APPRUN'
 #!/bin/sh
@@ -154,6 +237,12 @@ export GIO_MODULE_DIR="$HERE/usr/lib/gio/modules"
 export GDK_PIXBUF_MODULE_FILE="$HERE/usr/lib/gdk-pixbuf-2.0/loaders.cache"
 export WEBKIT_DISABLE_COMPOSITING_MODE=1
 export GTK_USE_PORTAL=1
+# libwebkit2gtk was binary-patched to look for helpers at /tmp/.g560wk.
+# Create a symlink there pointing at the bundled dir. Best-effort: if
+# another instance already put one there for a different AppImage it
+# gets replaced; if two AppImages coexist they'll clobber each other's
+# symlink, but for a single install of this app it is stable.
+ln -sfn "$HERE/usr/lib/webkit2gtk-4.1" /tmp/.g560wk 2>/dev/null || true
 
 # Flag dispatch (primary): --cli routes into the CLI binary.
 if [ "${1:-}" = "--cli" ]; then
