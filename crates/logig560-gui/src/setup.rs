@@ -206,7 +206,7 @@ pub fn install_service_unit() -> ActionOutcome {
         return ActionOutcome::err(anyhow!("create {}: {err}", parent.display()));
     }
     let contents =
-        SERVICE_UNIT_TEMPLATE.replace("@LOGIG560_BINARY@", binary.to_string_lossy().as_ref());
+        SERVICE_UNIT_TEMPLATE.replace("@LAUNCHER@", binary.to_string_lossy().as_ref());
     if let Err(err) = write_private(&unit_path, contents.as_bytes()) {
         return ActionOutcome::err(err);
     }

@@ -7,7 +7,7 @@ StartLimitIntervalSec=0
 
 [Service]
 Type=simple
-ExecStart=@LOGIG560_BINARY@ run
+ExecStart=@LAUNCHER@ run
 Restart=on-failure
 RestartSec=2s
 TimeoutStopSec=10s
