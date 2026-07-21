@@ -165,6 +165,5 @@ For deeper diagnosis, see [`docs/troubleshooting.md`](docs/troubleshooting.md) a
 - [`docs/color-pipeline.md`](docs/color-pipeline.md) — geometry, sampler, OKLab transitions
 - [`docs/usb-and-safety.md`](docs/usb-and-safety.md) — HID protocol, 6 ms pacing, blackout semantics
 - [`docs/testing.md`](docs/testing.md) — automated and hardware gates
-- [`HANDOFF_BAZZITE.md`](HANDOFF_BAZZITE.md) — Bazzite port and prototype acceptance record
 
 Milestone hardware evidence lives under `docs/hardware/`.

@@ -12,7 +12,7 @@ Read these documents in order before changing runtime behavior:
 4. [`docs/testing.md`](docs/testing.md) — required automated and hardware checks.
 5. The topic-specific document linked from [`docs/README.md`](docs/README.md).
 
-`README.md` is the user-facing overview. `HANDOFF_BAZZITE.md` records the machine-specific port and acceptance.
+`README.md` is the user-facing overview.
 
 ## Current repository state
 
@@ -126,7 +126,6 @@ When behavior changes, update all affected current documents:
 - `README.md` for user-visible behavior or commands.
 - `docs/project-status.md` for completion/limitations.
 - The relevant subsystem document.
-- `HANDOFF_BAZZITE.md` for machine-specific behavior.
 - `docs/decisions/` when a design choice or invariant changes.
 
 Keep historical acceptance documents intact unless correcting a factual error; add a clearly dated current note instead of rewriting the past.

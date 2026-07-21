@@ -164,7 +164,7 @@ There is no dedicated link checker yet. At minimum:
 
 ```bash
 git diff --check
-rg -n '\]\([^)]*\.md' README.md AGENTS.md HANDOFF_BAZZITE.md docs
+rg -n '\]\([^)]*\.md' README.md AGENTS.md docs
 ```
 
 Manually verify new relative links and update `docs/README.md` when adding a current document.

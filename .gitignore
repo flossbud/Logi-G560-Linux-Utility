@@ -5,3 +5,6 @@
 /*.jpg
 /*.pdf
 /ui-example/
+
+# Machine-specific handoff, kept local.
+/HANDOFF_BAZZITE.md

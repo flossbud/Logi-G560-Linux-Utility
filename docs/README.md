@@ -41,7 +41,6 @@ Use this page to choose the shortest path to the information you need.
 - [`decisions/README.md`](decisions/README.md) indexes the current architecture decision records.
 - [`hardware/g560-zone-map.md`](hardware/g560-zone-map.md) records the physically verified protocol-to-zone mapping.
 - [`hardware/milestone-1-results.md`](hardware/milestone-1-results.md) is the Fedora milestone-one acceptance record.
-- [`../HANDOFF_BAZZITE.md`](../HANDOFF_BAZZITE.md) is the Bazzite port and final prototype acceptance record.
 
 ## Authority order
 
@@ -50,7 +49,7 @@ When documents disagree, use this order:
 1. Current source and tests.
 2. Root [`AGENTS.md`](../AGENTS.md) invariants.
 3. Current topic documents in this directory.
-4. `README.md` and `HANDOFF_BAZZITE.md`.
+4. `README.md`.
 5. Historical milestone results, plans, and review artifacts.
 
 Update the current documents when source behavior changes so agents rarely need to resolve such conflicts.

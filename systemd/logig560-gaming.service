@@ -1,6 +1,5 @@
 [Unit]
 Description=G560 Linux Utility ambient lighting for Bazzite Gaming Mode
-Documentation=file:%h/Documents/G560 Linux Utility/HANDOFF_BAZZITE.md
 After=pipewire.service gamescope-session-plus@steam.service
 PartOf=gamescope-session-plus@steam.service
 StartLimitIntervalSec=0
