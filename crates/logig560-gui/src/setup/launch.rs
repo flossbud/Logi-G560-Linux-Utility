@@ -160,10 +160,10 @@ fn extract_launcher_appimage_path(script: &str) -> Option<PathBuf> {
     // The generated script's exec line is:  exec 'PATH' --cli "$@"
     for line in script.lines() {
         let line = line.trim_start();
-        if !line.starts_with("exec ") {
+        let Some(rest) = line.strip_prefix("exec ") else {
             continue;
-        }
-        let rest = line.trim_start_matches("exec ").trim_start();
+        };
+        let rest = rest.trim_start();
         if !rest.starts_with('\'') {
             return None;
         }
