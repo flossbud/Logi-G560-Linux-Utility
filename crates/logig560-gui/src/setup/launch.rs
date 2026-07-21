@@ -120,3 +120,13 @@ pub fn home_bin_dir() -> Result<PathBuf> {
 pub fn launcher_path() -> Result<PathBuf> {
     Ok(home_bin_dir()?.join("logig560"))
 }
+
+/// Desktop unit template baked into the GUI binary.
+const DESKTOP_UNIT_TEMPLATE: &str =
+    include_str!("../../../../systemd/logig560-desktop.service.in");
+
+/// Substitute @LAUNCHER@ in the desktop unit template. `exec_target` is
+/// the launcher path (AppImage mode) or CLI binary path (dev mode).
+pub fn render_desktop_unit(_ctx: &LaunchContext, exec_target: &Path) -> String {
+    DESKTOP_UNIT_TEMPLATE.replace("@LAUNCHER@", &exec_target.to_string_lossy())
+}

@@ -19,7 +19,6 @@ const UDEV_RULE_NAME: &str = "70-g560.rules";
 const UDEV_RULE_CONTENT: &str = include_str!("../../../contrib/70-g560.rules");
 const UDEV_RULE_INSTALL_PATH: &str = "/etc/udev/rules.d/70-g560.rules";
 const SERVICE_UNIT_NAME: &str = "logig560-desktop.service";
-const SERVICE_UNIT_TEMPLATE: &str = include_str!("../../../systemd/logig560-desktop.service.in");
 
 #[derive(Debug, Serialize)]
 pub struct UdevStatus {
@@ -188,16 +187,33 @@ fn systemctl_status_line() -> Option<String> {
 }
 
 pub fn install_service_unit() -> ActionOutcome {
-    let binary = match service_binary_path() {
-        Ok(path) => path,
-        Err(err) => return ActionOutcome::err(err),
+    use crate::setup::launch::{
+        LaunchContext, detect_launch_context, ensure_launcher, home_bin_dir, render_desktop_unit,
     };
-    if !binary.is_file() {
-        return ActionOutcome::err(anyhow!(
-            "service binary not found at {}; build it with `cargo build --release`",
-            binary.display()
-        ));
-    }
+
+    let ctx = detect_launch_context();
+    let exec_target = match &ctx {
+        LaunchContext::AppImage { appimage_path } => {
+            let bin_dir = match home_bin_dir() {
+                Ok(p) => p,
+                Err(err) => return ActionOutcome::err(err),
+            };
+            match ensure_launcher(&bin_dir, appimage_path) {
+                Ok(path) => path,
+                Err(err) => return ActionOutcome::err(err),
+            }
+        }
+        LaunchContext::DevBuild { cli_binary } => {
+            if !cli_binary.is_file() {
+                return ActionOutcome::err(anyhow!(
+                    "service binary not found at {}; build it with `cargo build --release`",
+                    cli_binary.display()
+                ));
+            }
+            cli_binary.clone()
+        }
+    };
+
     let unit_path = match service_unit_path() {
         Ok(path) => path,
         Err(err) => return ActionOutcome::err(err),
@@ -207,8 +223,7 @@ pub fn install_service_unit() -> ActionOutcome {
     {
         return ActionOutcome::err(anyhow!("create {}: {err}", parent.display()));
     }
-    let contents =
-        SERVICE_UNIT_TEMPLATE.replace("@LAUNCHER@", binary.to_string_lossy().as_ref());
+    let contents = render_desktop_unit(&ctx, &exec_target);
     if let Err(err) = write_private(&unit_path, contents.as_bytes()) {
         return ActionOutcome::err(err);
     }
@@ -242,14 +257,6 @@ fn run_systemctl(args: &[&str]) -> bool {
         .status()
         .map(|s| s.success())
         .unwrap_or(false)
-}
-
-fn service_binary_path() -> Result<PathBuf> {
-    let this = env::current_exe().context("locate current executable")?;
-    let dir = this
-        .parent()
-        .ok_or_else(|| anyhow!("current exe has no parent directory"))?;
-    Ok(dir.join("logig560"))
 }
 
 fn write_private(path: &std::path::Path, content: &[u8]) -> Result<()> {

@@ -6,7 +6,9 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 
-use logig560_gui::setup::launch::{LaunchContext, detect_launch_context_with, ensure_launcher};
+use logig560_gui::setup::launch::{
+    LaunchContext, detect_launch_context_with, ensure_launcher, render_desktop_unit,
+};
 
 #[test]
 fn detects_appimage_context_when_env_var_set() {
@@ -88,4 +90,29 @@ fn ensure_launcher_shell_escapes_appimage_path() {
         .status()
         .expect("sh available");
     assert!(status.success(), "generated launcher is not shell-parseable:\n{contents}");
+}
+
+#[test]
+fn desktop_unit_appimage_uses_launcher_path() {
+    let ctx = LaunchContext::AppImage {
+        appimage_path: PathBuf::from("/home/user/G560.AppImage"),
+    };
+    let launcher = PathBuf::from("/home/user/.local/bin/logig560");
+    let rendered = render_desktop_unit(&ctx, &launcher);
+    assert!(
+        rendered.contains("ExecStart=/home/user/.local/bin/logig560 run"),
+        "rendered unit missing launcher ExecStart:\n{rendered}",
+    );
+    assert!(!rendered.contains("@LAUNCHER@"), "placeholder not substituted");
+}
+
+#[test]
+fn desktop_unit_dev_build_uses_binary_path() {
+    let cli = PathBuf::from("/home/user/proj/target/release/logig560");
+    let ctx = LaunchContext::DevBuild { cli_binary: cli.clone() };
+    let rendered = render_desktop_unit(&ctx, &cli);
+    assert!(
+        rendered.contains("ExecStart=/home/user/proj/target/release/logig560 run"),
+        "rendered unit missing dev ExecStart:\n{rendered}",
+    );
 }
