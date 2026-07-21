@@ -75,6 +75,7 @@ fn main() {
             commands::set_manual_zones,
             commands::choose_desktop_display,
             commands::restart_capture,
+            commands::mark_setup_complete,
             commands::get_connection_state,
             commands::get_cached_snapshot,
             commands::check_udev_status,

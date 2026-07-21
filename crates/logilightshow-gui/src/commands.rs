@@ -88,6 +88,15 @@ pub async fn restart_capture(state: tauri::State<'_, ServiceClient>) -> Result<C
 }
 
 #[tauri::command]
+pub async fn mark_setup_complete(
+    state: tauri::State<'_, ServiceClient>,
+) -> Result<CommandOutcome, ()> {
+    Ok(to_outcome(
+        state.send(ClientCommand::MarkSetupComplete).await,
+    ))
+}
+
+#[tauri::command]
 pub async fn get_connection_state(
     state: tauri::State<'_, ServiceClient>,
 ) -> Result<ConnectionState, ()> {

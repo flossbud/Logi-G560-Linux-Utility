@@ -7,6 +7,43 @@
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
+    <div class="first-run" data-first-run hidden>
+      <div class="first-run-card">
+        <div class="first-run-eyebrow">Welcome</div>
+        <h2>Let's set up LogiLightShow</h2>
+        <p>
+          Three quick steps get your Logitech G560 working with content-aware
+          lighting on Linux:
+        </p>
+        <ol class="first-run-steps">
+          <li>
+            <b>Speaker access.</b> Install a udev rule so your user session can
+            write colors without root.
+          </li>
+          <li>
+            <b>Background service.</b> Install a systemd user unit so lighting
+            keeps running after you close this window.
+          </li>
+          <li>
+            <b>Display capture.</b> Pick a monitor for Content-Aware mode when
+            you're ready to try it.
+          </li>
+        </ol>
+        <p class="first-run-note">
+          You can revisit any of this from <b>Setup &amp; Service</b> later.
+          Manual color control works right away.
+        </p>
+        <div class="first-run-actions">
+          <button class="pill primary" data-first-run-start>
+            Open Setup &amp; Service
+          </button>
+          <button class="pill" data-first-run-skip>
+            I'll set this up later
+          </button>
+        </div>
+      </div>
+    </div>
+
     <div class="gh-window" data-interactive-lighting>
       <header class="gh-top">
         <div class="brandmark">G<span class="brandmark-sub">560</span></div>

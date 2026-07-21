@@ -100,6 +100,7 @@ pub struct ServiceSnapshot {
     pub writer_health: HealthState,
     pub diagnostics: DiagnosticCounters,
     pub confirmed_colors: Vec<ZoneColor>,
+    pub setup_complete: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Error, PartialEq, Serialize, Deserialize)]

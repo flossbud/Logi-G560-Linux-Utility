@@ -31,6 +31,10 @@ const panel = document.querySelector("[data-interactive-lighting]");
 const q = (sel, root = panel) => root.querySelector(sel);
 const qa = (sel, root = panel) => root.querySelectorAll(sel);
 
+const firstRunOverlay = document.querySelector("[data-first-run]");
+const firstRunStart = document.querySelector("[data-first-run-start]");
+const firstRunSkip = document.querySelector("[data-first-run-skip]");
+
 const els = {
   serviceDot: q("[data-service-dot]"),
   serviceLabel: q("[data-service-label]"),
@@ -228,7 +232,22 @@ function render() {
   renderStage();
   renderSelectionCopy();
   renderContentAware();
+  renderFirstRun();
   if (state.activePage === "diagnostics") renderDiagnostics();
+}
+
+function renderFirstRun() {
+  const snap = state.snapshot;
+  const needed = snap ? !snap.setup_complete : false;
+  firstRunOverlay.hidden = !needed;
+}
+
+async function markSetupComplete() {
+  try {
+    await invoke("mark_setup_complete");
+  } catch (err) {
+    console.warn("mark_setup_complete failed", err);
+  }
 }
 
 function renderConnection() {
@@ -760,6 +779,12 @@ async function bootstrap() {
   bindSetup();
   bindDiagnostics();
   bindAbout();
+
+  firstRunStart.addEventListener("click", async () => {
+    switchPage("setup");
+    await markSetupComplete();
+  });
+  firstRunSkip.addEventListener("click", markSetupComplete);
 
   switchPage("lighting");
 

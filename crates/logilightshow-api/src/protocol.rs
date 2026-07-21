@@ -35,6 +35,9 @@ pub enum ClientCommand {
     /// Tear down and restart the active content-aware capture engine
     /// without changing the saved backend, mode, or manual settings.
     RestartCapture,
+    /// Persist that the user has finished (or explicitly dismissed) the
+    /// first-run setup flow, so the GUI stops showing the welcome overlay.
+    MarkSetupComplete,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -97,6 +100,7 @@ mod tests {
                 last_successful_write_age_ms: None,
             },
             confirmed_colors: Vec::new(),
+            setup_complete: true,
         }
     }
 

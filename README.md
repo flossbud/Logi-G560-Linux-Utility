@@ -1,6 +1,8 @@
 # LogiLightShow
 
-LogiLightShow is an experimental low-latency screen matcher for the Logitech G560 on Linux. The CLI captures one display, samples four polygons shaped for the speakers' front/rear light layout, and drives the four verified lighting zones. Desktop Mode uses the system ScreenCast portal; Bazzite Gaming Mode captures Gamescope's native PipeWire output. The prototype is accepted on Fedora GNOME Wayland and on the same machine running Bazzite Desktop Mode, Gaming Mode, and real games. A polished GUI and distributable packaging remain future work.
+LogiLightShow is an experimental low-latency screen matcher for the Logitech G560 on Linux. The CLI captures one display, samples four polygons shaped for the speakers' front/rear light layout, and drives the four verified lighting zones. Desktop Mode uses the system ScreenCast portal; Bazzite Gaming Mode captures Gamescope's native PipeWire output. The prototype is accepted on Fedora/Bazzite GNOME and Gamescope, and its unchanged Desktop backend has been operationally validated on Arch Linux KDE Plasma 6 Wayland.
+
+The `run` and `run-gaming` commands now act as a persistent lighting service that also exposes a newline-delimited JSON API on the user-session Unix socket `$XDG_RUNTIME_DIR/logilightshow.sock`. A Tauri 2 GUI (`crates/logilightshow-gui/`) drives the service over that socket to control manual color, brightness, master power, Content-Aware mode, capture backend, setup, and diagnostics. Distributable packaging remains future work.
 
 ## Documentation
 
@@ -29,6 +31,19 @@ pkexec dnf install -y gcc pkgconf-pkg-config gstreamer1-devel gstreamer1-plugins
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ~/.cargo/bin/cargo build --release
 ```
+
+For Arch Linux with KDE Plasma Wayland:
+
+```bash
+sudo pacman -S --needed \
+  base-devel pkgconf rustup \
+  gstreamer gst-plugins-base gst-plugins-bad gst-plugin-pipewire \
+  pipewire libusb xdg-desktop-portal xdg-desktop-portal-kde
+rustup toolchain install 1.97.1
+cargo build --release
+```
+
+`gst-plugin-pipewire` is required at runtime; without it, `gst-inspect-1.0 pipewiresrc` and Desktop capture fail even when Plasma's portal and PipeWire services are healthy.
 
 Bazzite's immutable host should not be modified just to assemble a development dependency collection. Build in a Fedora Distrobox/Toolbox, then run the host-mounted release binary in the user's real Wayland/PipeWire session. See [the build guide](docs/build-and-run.md) for the tested container command and required packages.
 

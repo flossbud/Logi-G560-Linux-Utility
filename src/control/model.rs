@@ -154,6 +154,14 @@ impl ControllerModel {
         ModelEffect::NoWrite
     }
 
+    pub fn mark_setup_complete(&mut self) -> ModelEffect {
+        if !self.config.setup_complete {
+            self.config.setup_complete = true;
+            self.advance();
+        }
+        ModelEffect::NoWrite
+    }
+
     pub fn snapshot(&self) -> ServiceSnapshot {
         ServiceSnapshot {
             api_version: API_VERSION,
@@ -178,6 +186,7 @@ impl ControllerModel {
                     color: self.confirmed_colors.get(zone).into(),
                 })
                 .collect(),
+            setup_complete: self.config.setup_complete,
         }
     }
 

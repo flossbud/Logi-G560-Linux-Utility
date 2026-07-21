@@ -362,6 +362,72 @@ body {
   margin-left: 4px;
 }
 
+/* First-run overlay */
+.first-run {
+  position: fixed;
+  inset: 0;
+  background: rgba(3, 4, 5, 0.72);
+  backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+  padding: 32px;
+}
+.first-run[hidden] {
+  display: none;
+}
+.first-run-card {
+  background: var(--panel);
+  border: 1px solid #30363b;
+  padding: 34px 38px;
+  border-radius: 6px;
+  max-width: 520px;
+  box-shadow: 0 30px 90px rgba(0, 0, 0, 0.55);
+}
+.first-run-eyebrow {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--cyan);
+  margin-bottom: 8px;
+}
+.first-run-card h2 {
+  margin: 0 0 12px;
+  font-size: 24px;
+  font-weight: 720;
+}
+.first-run-card p {
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.55;
+  margin: 0 0 14px;
+}
+.first-run-steps {
+  color: #cfd6db;
+  font-size: 12px;
+  line-height: 1.55;
+  padding-left: 22px;
+  margin: 0 0 14px;
+}
+.first-run-steps li {
+  margin-bottom: 8px;
+}
+.first-run-steps b {
+  color: var(--copy);
+}
+.first-run-note {
+  font-size: 11px;
+  color: var(--muted);
+  border-top: 1px solid #262b2f;
+  padding-top: 12px;
+}
+.first-run-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
 /* Content-Aware inline panel */
 .mode-panel {
   display: block;

@@ -382,6 +382,7 @@ where
         }
         ClientCommand::SetLightsEnabled { enabled } => model.set_lights_enabled(enabled),
         ClientCommand::SetMode { mode } => model.set_mode(mode),
+        ClientCommand::MarkSetupComplete => model.mark_setup_complete(),
         ClientCommand::SetManualZones { updates } => match model.apply_manual_updates(&updates) {
             Ok(effect) => effect,
             Err(err) => return RequestResult::Err { error: err },
