@@ -115,4 +115,5 @@ fn desktop_unit_dev_build_uses_binary_path() {
         rendered.contains("ExecStart=/home/user/proj/target/release/logig560 run"),
         "rendered unit missing dev ExecStart:\n{rendered}",
     );
+    assert!(!rendered.contains("@LAUNCHER@"), "placeholder not substituted");
 }
