@@ -6,6 +6,7 @@ pub mod engine;
 pub mod frame;
 pub mod latest;
 pub mod sampler;
+pub mod service;
 pub mod transition;
 pub mod usb;
 

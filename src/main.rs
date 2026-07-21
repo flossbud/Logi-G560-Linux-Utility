@@ -6,12 +6,12 @@ use std::{
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use logilightshow::{
-    AppConfig, CaptureRecoverySnapshot, ConfigStore, EngineMetrics, EngineSnapshot,
-    FileConfigStore, FrameSource, FrameSourceFactory, LightSink, RecoveringFrameSource,
-    RecoveringLightSink, Rgb8, SamplerConfig, ZoneColors, ZoneLayout, ZoneMasks,
-    capture::{CaptureError, GStreamerFrameSource, GamescopeFrameSource, PortalCapture},
-    config_path, run_engine_with_metrics, sample_zones,
-    usb::{AsyncG560, G560, LibUsbTransport},
+    CaptureBackend, ConfigStore, FileConfigStore, FrameSource, Rgb8, SamplerConfig, ZoneColors,
+    ZoneLayout, ZoneMasks,
+    capture::{GStreamerFrameSource, GamescopeFrameSource, PortalCapture},
+    config_path, sample_zones,
+    service::{ServiceOptions, run_service},
+    usb::{G560, LibUsbTransport},
 };
 use tokio_util::sync::CancellationToken;
 
@@ -256,136 +256,25 @@ async fn main() -> Result<()> {
                 permission_status,
             );
         }
-        Command::Run => run_live().await?,
-        Command::RunGaming => run_gaming().await?,
+        Command::Run => serve(CaptureBackend::DesktopPortal).await?,
+        Command::RunGaming => serve(CaptureBackend::Gamescope).await?,
     }
     Ok(())
 }
 
-async fn run_live() -> Result<()> {
-    let config_store = FileConfigStore::new(config_path()?);
-    let config = config_store.load()?.into_config();
-    let source = RecoveringFrameSource::new(PortalFrameSourceFactory {
-        config_store,
-        config,
-        has_opened: false,
-    });
-    drive_live(source).await
-}
-
-async fn run_gaming() -> Result<()> {
-    eprintln!("starting Gaming Mode capture from PipeWire node `gamescope`");
-    let source = RecoveringFrameSource::new(GamescopeFrameSourceFactory);
-    drive_live(source).await
-}
-
-async fn drive_live<F>(source: RecoveringFrameSource<F>) -> Result<()>
-where
-    F: FrameSourceFactory + 'static,
-    F::Source: 'static,
-{
-    let capture_recovery_metrics = source.metrics();
-
-    let cancellation = CancellationToken::new();
-    let signal_cancellation = cancellation.clone();
+async fn serve(backend: CaptureBackend) -> Result<()> {
+    let shutdown = CancellationToken::new();
+    let signal_cancel = shutdown.clone();
     let signal_task = tokio::spawn(async move {
         if shutdown_signal().await.is_ok() {
-            signal_cancellation.cancel();
+            signal_cancel.cancel();
         }
     });
-    let factory = || -> Result<AsyncG560<LibUsbTransport>> {
-        let mut device = G560::new(LibUsbTransport::open()?);
-        device.blackout()?;
-        Ok(AsyncG560::new(device))
-    };
-    let mut sink = RecoveringLightSink::new(factory, cancellation.clone());
-    let recovery_metrics = sink.metrics();
-    if let Err(error) = sink.write(ZoneColors::BLACK).await {
-        signal_task.abort();
-        if cancellation.is_cancelled() {
-            return Ok(());
-        }
-        return Err(error.context("initial G560 blackout failed"));
-    }
-    eprintln!("G560 opened and safety blackout completed; waiting for capture frames");
-
-    let metrics = EngineMetrics::new();
-    let mut previous = metrics.snapshot();
-    let engine = run_engine_with_metrics(
-        source,
-        sink,
-        ZoneLayout::g560_default(),
-        SamplerConfig::default(),
-        cancellation.clone().cancelled_owned(),
-        metrics.clone(),
-    );
-    tokio::pin!(engine);
-    let mut reporting = tokio::time::interval(Duration::from_secs(5));
-    reporting.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-    reporting.tick().await;
-
-    let result = loop {
-        tokio::select! {
-            result = &mut engine => break result,
-            _ = reporting.tick() => {
-                let current = metrics.snapshot();
-                print_interval(
-                    previous,
-                    current,
-                    recovery_metrics.snapshot(),
-                    capture_recovery_metrics.snapshot(),
-                );
-                previous = current;
-            }
-        }
-    };
+    let mut options = ServiceOptions::new(backend);
+    options.shutdown = shutdown;
+    let result = run_service(options).await;
     signal_task.abort();
-    let totals = metrics.snapshot();
-    let recovery = recovery_metrics.snapshot();
-    let capture_recovery = capture_recovery_metrics.snapshot();
-    println!(
-        "totals: elapsed={:.2}s captured={} rendered={} dropped={} stalls={} latency_ms[p50={:.2} p95={:.2} p99={:.2}] USB_errors={} open_failures={} reopens={} blackout_failures={} capture_stream_failures={} capture_open_failures={} capture_reopens={} capture_shutdown_failures={}",
-        totals.elapsed.as_secs_f64(),
-        totals.captured_frames,
-        totals.rendered_updates,
-        totals.dropped_frames,
-        totals.capture_stalls,
-        micros_to_millis(totals.capture_to_write_p50_us),
-        micros_to_millis(totals.capture_to_write_p95_us),
-        micros_to_millis(totals.capture_to_write_p99_us),
-        recovery.usb_write_failures,
-        recovery.open_failures,
-        recovery.reopen_count,
-        recovery.blackout_failures,
-        capture_recovery.stream_failures,
-        capture_recovery.open_failures,
-        capture_recovery.successful_reopens,
-        capture_recovery.shutdown_failures,
-    );
-    match result {
-        Ok(_) => Ok(()),
-        Err(error) if capture_was_cancelled(&error) => Ok(()),
-        Err(error) => Err(error),
-    }
-}
-
-struct GamescopeFrameSourceFactory;
-
-#[async_trait::async_trait]
-impl FrameSourceFactory for GamescopeFrameSourceFactory {
-    type Source = GamescopeFrameSource;
-
-    async fn open(&mut self) -> Result<Self::Source> {
-        let source = GamescopeFrameSource::open()
-            .await
-            .map_err(anyhow::Error::from)?;
-        eprintln!("Gamescope PipeWire capture worker started; waiting for frames");
-        Ok(source)
-    }
-
-    fn should_retry(&self, error: &anyhow::Error) -> bool {
-        !capture_was_cancelled(error)
-    }
+    result
 }
 
 async fn shutdown_signal() -> Result<()> {
@@ -395,108 +284,6 @@ async fn shutdown_signal() -> Result<()> {
         result = tokio::signal::ctrl_c() => result.context("install Ctrl-C handler"),
         _ = terminate.recv() => Ok(()),
     }
-}
-
-fn print_interval(
-    previous: EngineSnapshot,
-    current: EngineSnapshot,
-    recovery: logilightshow::RecoverySnapshot,
-    capture_recovery: CaptureRecoverySnapshot,
-) {
-    let elapsed = current
-        .elapsed
-        .saturating_sub(previous.elapsed)
-        .as_secs_f64()
-        .max(f64::EPSILON);
-    let captured_fps = current
-        .captured_frames
-        .saturating_sub(previous.captured_frames) as f64
-        / elapsed;
-    let rendered_fps = current
-        .rendered_updates
-        .saturating_sub(previous.rendered_updates) as f64
-        / elapsed;
-    println!(
-        "stats: captured_fps={captured_fps:.1} rendered_updates_per_second={rendered_fps:.1} dropped={} stalls={} latency_ms[p50={:.2} p95={:.2} p99={:.2}] USB_errors={} capture_errors[stream={} open={} reopens={} shutdown={}]",
-        current.dropped_frames,
-        current.capture_stalls,
-        micros_to_millis(current.capture_to_write_p50_us),
-        micros_to_millis(current.capture_to_write_p95_us),
-        micros_to_millis(current.capture_to_write_p99_us),
-        recovery.usb_write_failures,
-        capture_recovery.stream_failures,
-        capture_recovery.open_failures,
-        capture_recovery.successful_reopens,
-        capture_recovery.shutdown_failures,
-    );
-}
-
-struct PortalFrameSourceFactory {
-    config_store: FileConfigStore,
-    config: AppConfig,
-    has_opened: bool,
-}
-
-#[async_trait::async_trait]
-impl FrameSourceFactory for PortalFrameSourceFactory {
-    type Source = GStreamerFrameSource;
-
-    async fn open(&mut self) -> Result<Self::Source> {
-        let grant = PortalCapture::open(self.config.restore_token.clone()).await?;
-        if let Some(restore_token) = grant.restore_token.as_deref() {
-            save_restore_token(&self.config_store, &mut self.config, restore_token)?;
-        }
-        let source = GStreamerFrameSource::open(grant).await?;
-        self.has_opened = true;
-        Ok(source)
-    }
-
-    fn should_retry(&self, error: &anyhow::Error) -> bool {
-        error
-            .chain()
-            .find_map(|cause| cause.downcast_ref::<CaptureError>())
-            .is_some_and(|error| capture_error_is_retryable(error, self.has_opened))
-    }
-}
-
-fn capture_error_is_retryable(error: &CaptureError, has_opened: bool) -> bool {
-    match error {
-        CaptureError::Portal { .. } => true,
-        CaptureError::Pipeline { .. } | CaptureError::Shutdown { .. } => has_opened,
-        CaptureError::GStreamer { .. } | CaptureError::PipeWire { .. } => has_opened,
-        CaptureError::Cleanup { primary, .. } => capture_error_is_retryable(primary, has_opened),
-        CaptureError::CaptureCancelled
-        | CaptureError::UnexpectedStreamCount { .. }
-        | CaptureError::MissingSampleData { .. }
-        | CaptureError::UnsupportedCaps { .. }
-        | CaptureError::InvalidFrameLayout { .. }
-        | CaptureError::EndOfStream => false,
-    }
-}
-
-fn capture_was_cancelled(error: &anyhow::Error) -> bool {
-    error.chain().any(|cause| {
-        matches!(
-            cause.downcast_ref::<CaptureError>(),
-            Some(CaptureError::CaptureCancelled)
-        )
-    })
-}
-
-fn micros_to_millis(micros: u64) -> f64 {
-    micros as f64 / 1_000.0
-}
-
-fn save_restore_token<S: ConfigStore>(
-    store: &S,
-    config: &mut AppConfig,
-    restore_token: &str,
-) -> Result<()> {
-    let mut updated = config.clone();
-    updated.restore_token = Some(restore_token.to_owned());
-    store.save(&updated)?;
-    *config = updated;
-    Ok(())
 }
 
 #[cfg(test)]
@@ -526,6 +313,12 @@ mod tests {
     fn parses_run_command() {
         let cli = Cli::try_parse_from(["logilightshow", "run"]).unwrap();
         assert!(matches!(cli.command, Command::Run));
+    }
+
+    #[test]
+    fn parses_run_gaming_command() {
+        let cli = Cli::try_parse_from(["logilightshow", "run-gaming"]).unwrap();
+        assert!(matches!(cli.command, Command::RunGaming));
     }
 
     #[test]
@@ -569,82 +362,5 @@ mod tests {
             ])
             .is_err()
         );
-    }
-
-    #[test]
-    fn restore_token_is_atomically_saved_with_private_permissions() {
-        use std::fs;
-        use std::os::unix::fs::PermissionsExt;
-
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("nested/config.toml");
-        let store = FileConfigStore::new(path.clone());
-        let mut config = AppConfig::default();
-        save_restore_token(&store, &mut config, "private-token").unwrap();
-
-        let config = store.load().unwrap().into_config();
-        assert_eq!(config.version, 2);
-        assert_eq!(config.restore_token.as_deref(), Some("private-token"));
-        assert_eq!(
-            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
-            0o600
-        );
-        assert_eq!(fs::read_dir(path.parent().unwrap()).unwrap().count(), 1);
-    }
-
-    #[test]
-    fn stale_temporary_file_cannot_weaken_restore_token_permissions() {
-        use std::fs::{self, OpenOptions};
-        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-
-        let directory = tempfile::tempdir().unwrap();
-        let parent = directory.path().join("nested");
-        fs::create_dir_all(&parent).unwrap();
-        let stale = parent.join(format!(".config.toml.tmp-{}", std::process::id()));
-        OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o666)
-            .open(&stale)
-            .unwrap();
-        fs::set_permissions(&stale, fs::Permissions::from_mode(0o644)).unwrap();
-        let path = parent.join("config.toml");
-        let store = FileConfigStore::new(path.clone());
-        let mut config = AppConfig::default();
-
-        save_restore_token(&store, &mut config, "still-private").unwrap();
-
-        assert_eq!(
-            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
-            0o600
-        );
-        assert_eq!(
-            fs::metadata(stale).unwrap().permissions().mode() & 0o777,
-            0o644
-        );
-    }
-
-    #[test]
-    fn runtime_pipeline_failure_retries_only_after_a_capture_opened() {
-        let error = CaptureError::Pipeline {
-            element: "pipewiresrc".to_owned(),
-            message: "remote node was destroyed".to_owned(),
-            debug: String::new(),
-        };
-
-        assert!(!capture_error_is_retryable(&error, false));
-        assert!(capture_error_is_retryable(&error, true));
-    }
-
-    #[test]
-    fn explicit_capture_cancel_is_not_retried() {
-        let error =
-            anyhow::Error::new(CaptureError::CaptureCancelled).context("frame capture failed");
-
-        assert!(!capture_error_is_retryable(
-            &CaptureError::CaptureCancelled,
-            true
-        ));
-        assert!(capture_was_cancelled(&error));
     }
 }
