@@ -178,6 +178,74 @@ done
 # replacement path pointing at the bundled helper dir. The replacement
 # path is fixed so it can be baked in, and short so we don't need to
 # shift any file offsets.
+echo ">>> Bundling GIO modules (needed for DBus portal + TLS)"
+# linuxdeploy-plugin-gtk does not consistently bundle GIO modules across
+# distros. Without libgiognutls.so the ScreenCast portal DBus call goes
+# silent (no picker, no permission), which kills Content-Aware capture.
+GIO_MODULE_SRC=""
+for candidate in \
+    /usr/lib/x86_64-linux-gnu/gio/modules \
+    /usr/lib64/gio/modules \
+    /usr/lib/gio/modules; do
+    if [[ -d "$candidate" ]] && ls "$candidate"/*.so >/dev/null 2>&1; then
+        GIO_MODULE_SRC="$candidate"
+        break
+    fi
+done
+if [[ -z "$GIO_MODULE_SRC" ]]; then
+    echo "error: cannot find host GIO modules directory" >&2
+    exit 1
+fi
+mkdir -p "$APPDIR/usr/lib/gio/modules"
+cp -a "$GIO_MODULE_SRC"/*.so "$APPDIR/usr/lib/gio/modules/"
+# Regenerate giomodule.cache so GIO discovers the bundled modules. We
+# rebuild it inside the container so paths match; regenerated at runtime
+# is fragile because gio-querymodules probes libraries with dlopen.
+if command -v gio-querymodules >/dev/null 2>&1; then
+    gio-querymodules "$APPDIR/usr/lib/gio/modules" || true
+elif command -v gio-querymodules-64 >/dev/null 2>&1; then
+    gio-querymodules-64 "$APPDIR/usr/lib/gio/modules" || true
+fi
+# Rewrite rpaths so the modules find bundled libs, not host /usr/lib.
+for module in "$APPDIR/usr/lib/gio/modules"/*.so; do
+    [[ -f "$module" ]] && patchelf --set-rpath '$ORIGIN/../..' "$module" 2>/dev/null || true
+done
+
+# Relocate gst-plugin-scanner into the path AppRun expects. linuxdeploy
+# leaves it at the source multilib subdir (Ubuntu:
+# usr/lib/gstreamer1.0/gstreamer-1.0/gst-plugin-scanner), but AppRun and
+# the Rust engine look at usr/lib/gstreamer-1.0/gst-plugin-scanner. If
+# the scanner is missing at the expected path, GStreamer aborts plugin
+# registration and the Desktop capture pipeline never comes up.
+echo ">>> Relocating gst-plugin-scanner"
+SCANNER_SRC=""
+for candidate in \
+    "$APPDIR/usr/lib/gstreamer1.0/gstreamer-1.0/gst-plugin-scanner" \
+    "$APPDIR/usr/libexec/gstreamer-1.0/gst-plugin-scanner"; do
+    if [[ -f "$candidate" ]]; then
+        SCANNER_SRC="$candidate"
+        break
+    fi
+done
+if [[ -z "$SCANNER_SRC" ]]; then
+    # Fall back to copying from the host if linuxdeploy didn't bring it.
+    for candidate in \
+        /usr/lib/x86_64-linux-gnu/gstreamer1.0/gstreamer-1.0/gst-plugin-scanner \
+        /usr/libexec/gstreamer-1.0/gst-plugin-scanner \
+        /usr/lib64/gstreamer1.0/gst-plugin-scanner; do
+        if [[ -f "$candidate" ]]; then
+            SCANNER_SRC="$candidate"
+            break
+        fi
+    done
+fi
+if [[ -z "$SCANNER_SRC" ]]; then
+    echo "error: cannot find gst-plugin-scanner on host or in AppDir" >&2
+    exit 1
+fi
+cp -a "$SCANNER_SRC" "$APPDIR/usr/lib/gstreamer-1.0/gst-plugin-scanner"
+patchelf --set-rpath '$ORIGIN/..' "$APPDIR/usr/lib/gstreamer-1.0/gst-plugin-scanner" 2>/dev/null || true
+
 echo ">>> Patching WebKit hardcoded helper paths"
 WEBKIT_SO=""
 for candidate in \
