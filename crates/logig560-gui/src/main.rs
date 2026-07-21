@@ -4,6 +4,7 @@ use tracing::{debug, info, warn};
 use tracing_subscriber::EnvFilter;
 
 use logig560_gui::client::{ServiceClient, default_socket_path};
+use logig560_gui::commands;
 
 fn main() {
     let filter = EnvFilter::try_from_default_env()
@@ -75,22 +76,22 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            logig560_gui::commands::frontend_log,
-            logig560_gui::commands::get_snapshot,
-            logig560_gui::commands::set_lights_enabled,
-            logig560_gui::commands::set_mode,
-            logig560_gui::commands::set_manual_zones,
-            logig560_gui::commands::choose_desktop_display,
-            logig560_gui::commands::restart_capture,
-            logig560_gui::commands::mark_setup_complete,
-            logig560_gui::commands::get_connection_state,
-            logig560_gui::commands::get_cached_snapshot,
-            logig560_gui::commands::check_udev_status,
-            logig560_gui::commands::install_udev_rule,
-            logig560_gui::commands::check_service_status,
-            logig560_gui::commands::install_service_unit,
-            logig560_gui::commands::service_action,
-            logig560_gui::commands::version_info,
+            commands::frontend_log,
+            commands::get_snapshot,
+            commands::set_lights_enabled,
+            commands::set_mode,
+            commands::set_manual_zones,
+            commands::choose_desktop_display,
+            commands::restart_capture,
+            commands::mark_setup_complete,
+            commands::get_connection_state,
+            commands::get_cached_snapshot,
+            commands::check_udev_status,
+            commands::install_udev_rule,
+            commands::check_service_status,
+            commands::install_service_unit,
+            commands::service_action,
+            commands::version_info,
         ])
         .run(tauri::generate_context!())
         .expect("failed to launch G560 Linux Utility GUI");
