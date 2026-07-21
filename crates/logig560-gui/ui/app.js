@@ -121,7 +121,20 @@ const els = {
   serviceStop: q("[data-service-stop]"),
   serviceRestart: q("[data-service-restart]"),
   refreshService: q("[data-refresh-service]"),
+  uninstallService: q("[data-uninstall-service]"),
   serviceOutcome: q("[data-service-outcome]"),
+
+  gamingInstalled: q("[data-gaming-installed]"),
+  gamingEnabled: q("[data-gaming-enabled]"),
+  gamingActive: q("[data-gaming-active]"),
+  installGaming: q("[data-install-gaming]"),
+  uninstallGaming: q("[data-uninstall-gaming]"),
+  refreshGaming: q("[data-refresh-gaming]"),
+  gamingOutcome: q("[data-gaming-outcome]"),
+
+  launcherBanner: q("[data-launcher-banner]"),
+  launcherOldPath: q("[data-launcher-old-path]"),
+  relinkLauncher: q("[data-relink-launcher]"),
 
   // Diagnostics
   diagService: q("[data-diag-service]"),
@@ -587,7 +600,7 @@ function statusText(good, yes = "yes", no = "no") {
 }
 
 async function refreshSetup() {
-  await Promise.all([loadUdev(), loadService()]);
+  await Promise.all([loadUdev(), loadService(), loadGamingService()]);
 }
 async function loadUdev() {
   try {
@@ -620,6 +633,20 @@ async function loadService() {
     els.servicePath.textContent = status.unit_path || "—";
   } catch (err) {
     console.warn("check_service_status failed", err);
+  }
+}
+
+async function loadGamingService() {
+  try {
+    const status = await invoke("check_gaming_service_status");
+    els.gamingInstalled.textContent = statusText(status.unit_installed, "yes", "no");
+    els.gamingInstalled.className = statusClass(status.unit_installed);
+    els.gamingEnabled.textContent = statusText(status.enabled, "yes", "no");
+    els.gamingEnabled.className = statusClass(status.enabled);
+    els.gamingActive.textContent = statusText(status.active, "running", "stopped");
+    els.gamingActive.className = statusClass(status.active);
+  } catch (err) {
+    console.warn("check_gaming_service_status failed", err);
   }
 }
 
@@ -669,6 +696,66 @@ function bindSetup() {
   bindServiceAction(els.serviceStop, "stop");
   bindServiceAction(els.serviceRestart, "restart");
   els.refreshService.addEventListener("click", loadService);
+
+  els.uninstallService.addEventListener("click", async () => {
+    els.uninstallService.disabled = true;
+    showOutcome(els.serviceOutcome, null);
+    try {
+      const outcome = await invoke("uninstall_service_unit");
+      showOutcome(els.serviceOutcome, outcome);
+    } catch (err) {
+      showOutcome(els.serviceOutcome, { status: "err", error: String(err) });
+    } finally {
+      els.uninstallService.disabled = false;
+      await loadService();
+    }
+  });
+
+  els.installGaming.addEventListener("click", async () => {
+    els.installGaming.disabled = true;
+    showOutcome(els.gamingOutcome, null);
+    try {
+      const outcome = await invoke("install_gaming_service_unit");
+      showOutcome(els.gamingOutcome, outcome);
+    } catch (err) {
+      showOutcome(els.gamingOutcome, { status: "err", error: String(err) });
+    } finally {
+      els.installGaming.disabled = false;
+      await loadGamingService();
+    }
+  });
+
+  els.uninstallGaming.addEventListener("click", async () => {
+    els.uninstallGaming.disabled = true;
+    showOutcome(els.gamingOutcome, null);
+    try {
+      const outcome = await invoke("uninstall_gaming_service_unit");
+      showOutcome(els.gamingOutcome, outcome);
+    } catch (err) {
+      showOutcome(els.gamingOutcome, { status: "err", error: String(err) });
+    } finally {
+      els.uninstallGaming.disabled = false;
+      await loadGamingService();
+    }
+  });
+
+  els.refreshGaming.addEventListener("click", loadGamingService);
+
+  els.relinkLauncher.addEventListener("click", async () => {
+    els.relinkLauncher.disabled = true;
+    try {
+      const outcome = await invoke("relink_launcher");
+      if (outcome.status === "ok") {
+        els.launcherBanner.hidden = true;
+      } else {
+        alert(`Re-link failed: ${outcome.error}`);
+      }
+    } catch (err) {
+      alert(`Re-link failed: ${String(err)}`);
+    } finally {
+      els.relinkLauncher.disabled = false;
+    }
+  });
 }
 
 // -- Diagnostics page --------------------------------------------------
@@ -825,6 +912,21 @@ async function bootstrap() {
     });
   } catch (err) {
     report(`listen connection-state failed: ${err}`);
+  }
+  try {
+    await listen("launcher-status", (event) => {
+      const report = event.payload;
+      if (!report || report.context !== "appimage") return;
+      const state = report.state;
+      if (state && state.state === "stale") {
+        els.launcherOldPath.textContent = state.embedded || "";
+        els.launcherBanner.hidden = false;
+      } else {
+        els.launcherBanner.hidden = true;
+      }
+    });
+  } catch (err) {
+    report(`listen launcher-status failed: ${err}`);
   }
 
   try {
