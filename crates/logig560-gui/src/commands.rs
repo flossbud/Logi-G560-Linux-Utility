@@ -278,7 +278,7 @@ pub async fn verify_launcher_path() -> Result<LauncherReport, ()> {
             LaunchContext::DevBuild { .. } => LauncherReport {
                 context: "dev",
                 appimage_path: None,
-                state: crate::setup::launch::LauncherState::Missing,
+                state: crate::setup::launch::LauncherState::Unknown,
             },
         }
     })
