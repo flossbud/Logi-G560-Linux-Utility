@@ -236,12 +236,16 @@ The capture config contains a version and opaque token, not pixels or monitor im
 
 ## Build the AppImage
 
-The distributable is built on Ubuntu 22.04 for glibc portability. To
-reproduce locally:
+The distributable is built on Ubuntu 24.04. GStreamer 1.24 is required by
+the pinned `gstreamer` Rust crate (`gstreamer = "0.25"` with the `v1_24`
+feature on `gstreamer-video`), and Ubuntu 22.04 ships GStreamer 1.20 which
+is too old. Ubuntu 24.04's glibc 2.39 still runs on the target distros
+(Bazzite 43, Fedora 39+, Arch, Debian 13+). To reproduce locally:
 
 ```bash
 sudo apt-get install -y \
   build-essential pkg-config \
+  clang libclang-dev \
   libwebkit2gtk-4.1-dev libayatana-appindicator3-dev \
   libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
   libgstreamer-plugins-bad1.0-dev gstreamer1.0-pipewire \

@@ -4,9 +4,11 @@
 # Prerequisites (installed on the host or CI runner):
 #   - rustc/cargo (1.97.1 via rust-toolchain)
 #   - gcc, pkg-config
+#   - clang, libclang-dev (bindgen needs libclang for libspa-sys)
 #   - libwebkit2gtk-4.1-dev, libayatana-appindicator3-dev
-#   - libgstreamer1.0-dev, libgstreamer-plugins-base1.0-dev,
+#   - libgstreamer1.0-dev >= 1.24, libgstreamer-plugins-base1.0-dev,
 #     libgstreamer-plugins-bad1.0-dev, gstreamer1.0-pipewire
+#     (Ubuntu 24.04 ships 1.24; Ubuntu 22.04 ships 1.20, too old)
 #   - libpipewire-0.3-dev, libusb-1.0-0-dev, libgtk-3-dev
 #   - patchelf, desktop-file-utils, wget or curl
 #
@@ -89,7 +91,7 @@ Type=Application
 Name=G560 Linux Utility
 GenericName=Speaker Lighting Control
 Comment=Per-zone lighting and screen-matched ambient light for Logitech G560 speakers
-Exec=AppRun %U
+Exec=logig560-gui %U
 Icon=logig560
 Terminal=false
 Categories=Utility;Settings;HardwareSettings;
@@ -104,9 +106,18 @@ echo ">>> Running linuxdeploy with gtk + gstreamer plugins"
 # binutils and does not understand the `.relr.dyn` section produced by
 # ld with --pack-relative-relocs, which causes strip to fail on every
 # Arch-sourced library. The unstripped AppImage is larger but works;
-# CI on Ubuntu 22.04 (older binutils) does not need this override to
-# succeed, so it is safe to always set.
+# older-glibc build hosts do not need this override to succeed, so it is
+# safe to always set.
 export NO_STRIP=true
+
+# GStreamer plugin directory. linuxdeploy-plugin-gstreamer hardcodes
+# /usr/lib/gstreamer-1.0, which is correct on Debian/Ubuntu but wrong on
+# Fedora / RHEL / Bazzite (which use /usr/lib64). Auto-detect once here.
+if [[ -d /usr/lib64/gstreamer-1.0 ]]; then
+    export GSTREAMER_PLUGINS_DIR=/usr/lib64/gstreamer-1.0
+elif [[ -d /usr/lib/x86_64-linux-gnu/gstreamer-1.0 ]]; then
+    export GSTREAMER_PLUGINS_DIR=/usr/lib/x86_64-linux-gnu/gstreamer-1.0
+fi
 
 # Restrict the gstreamer plugin to the subset we actually load. Any plugin
 # listed in GSTREAMER_INCLUDE_LIBRARIES is copied; everything else is
