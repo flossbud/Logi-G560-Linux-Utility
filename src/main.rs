@@ -17,6 +17,7 @@ use tokio_util::sync::CancellationToken;
 use tracing_subscriber::EnvFilter;
 
 #[derive(Parser)]
+#[command(name = "logig560", version)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
