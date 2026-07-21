@@ -1,7 +1,7 @@
-// LogiLightShow GUI — Lighting page behaviour.
-// The frontend keeps a shadow copy of the last confirmed snapshot from the
-// service and re-renders on `snapshot-changed`. All user actions dispatch
-// through Tauri commands and never write hardware directly.
+// LogiLightShow GUI — full behaviour for Lighting, Setup & Service,
+// Diagnostics, and About pages. The service is the source of truth;
+// every user action dispatches a typed Tauri command and the UI paints
+// from the returned or broadcast ServiceSnapshot.
 
 const invoke = window.__TAURI__.core.invoke;
 const listen = window.__TAURI__.event.listen;
@@ -21,39 +21,112 @@ const state = {
   pickerHex: "#14C8F4",
   brightness: 100,
   connection: { kind: "connecting" },
+  activePage: "lighting",
+  udev: null,
+  serviceUnit: null,
+  version: null,
 };
 
 const panel = document.querySelector("[data-interactive-lighting]");
+const q = (sel, root = panel) => root.querySelector(sel);
+const qa = (sel, root = panel) => root.querySelectorAll(sel);
+
 const els = {
-  serviceDot: panel.querySelector("[data-service-dot]"),
-  serviceLabel: panel.querySelector("[data-service-label]"),
-  deviceDot: panel.querySelector("[data-device-dot]"),
-  deviceLabel: panel.querySelector("[data-device-label]"),
-  masterSwitch: panel.querySelector("[data-master-switch]"),
-  masterLabel: panel.querySelector("[data-master-label]"),
-  modeTabs: panel.querySelectorAll("[data-mode-tab]"),
-  modeBadge: panel.querySelector("[data-mode-badge]"),
-  liveLabel: panel.querySelector("[data-live-label]"),
-  controls: panel.querySelector(".controls"),
-  banner: panel.querySelector("[data-banner]"),
-  bannerText: panel.querySelector("[data-banner-text]"),
-  zones: panel.querySelectorAll("[data-zone]"),
-  groups: panel.querySelectorAll("[data-group]"),
-  colorInput: panel.querySelector("[data-color-input]"),
-  paletteButtons: panel.querySelectorAll("[data-palette-color]"),
-  hexOutput: panel.querySelector("[data-hex-output]"),
-  rgbOutput: panel.querySelector("[data-rgb-output]"),
-  selectionCount: panel.querySelector("[data-selection-count]"),
-  selectionCopy: panel.querySelector("[data-selection-copy]"),
-  brightnessInput: panel.querySelector("[data-brightness-input]"),
-  brightnessValue: panel.querySelector("[data-brightness-value]"),
-  lightZones: {
-    "left-rear": panel.querySelectorAll('[data-light-zone="left-rear"]'),
-    "left-front": panel.querySelectorAll('[data-light-zone="left-front"]'),
-    "right-front": panel.querySelectorAll('[data-light-zone="right-front"]'),
-    "right-rear": panel.querySelectorAll('[data-light-zone="right-rear"]'),
+  serviceDot: q("[data-service-dot]"),
+  serviceLabel: q("[data-service-label]"),
+  deviceDot: q("[data-device-dot]"),
+  deviceLabel: q("[data-device-label]"),
+  masterSwitch: q("[data-master-switch]"),
+  masterLabel: q("[data-master-label]"),
+
+  rail: qa("[data-page]"),
+  pages: qa("[data-page-body]"),
+
+  // Lighting
+  modeTabs: qa("[data-mode-tab]"),
+  modeBadge: q("[data-mode-badge]"),
+  liveLabel: q("[data-live-label]"),
+  controls: q(".controls"),
+  banner: q("[data-banner]"),
+  bannerText: q("[data-banner-text]"),
+  zones: qa("[data-zone]"),
+  groups: qa("[data-group]"),
+  colorInput: q("[data-color-input]"),
+  paletteButtons: qa("[data-palette-color]"),
+  hexOutput: q("[data-hex-output]"),
+  rgbOutput: q("[data-rgb-output]"),
+  selectionCount: q("[data-selection-count]"),
+  selectionCopy: q("[data-selection-copy]"),
+  brightnessInput: q("[data-brightness-input]"),
+  brightnessValue: q("[data-brightness-value]"),
+  modePanels: {
+    manual: q('[data-mode-panel="manual"]'),
+    "content-aware": q('[data-mode-panel="content-aware"]'),
   },
+  lightZones: {
+    "left-rear": qa('[data-light-zone="left-rear"]'),
+    "left-front": qa('[data-light-zone="left-front"]'),
+    "right-front": qa('[data-light-zone="right-front"]'),
+    "right-rear": qa('[data-light-zone="right-rear"]'),
+  },
+
+  // Content-Aware panel
+  caBackend: q("[data-ca-backend]"),
+  caCapture: q("[data-ca-capture]"),
+  caRate: q("[data-ca-rate]"),
+  caStalls: q("[data-ca-stalls]"),
+  chooseDisplay: q("[data-choose-display]"),
+  restartCapture: q("[data-restart-capture]"),
+
+  // Setup page
+  udevRule: q("[data-udev-rule]"),
+  udevDevice: q("[data-udev-device]"),
+  udevWritable: q("[data-udev-writable]"),
+  installUdev: q("[data-install-udev]"),
+  refreshUdev: q("[data-refresh-udev]"),
+  udevOutcome: q("[data-udev-outcome]"),
+
+  serviceInstalled: q("[data-service-installed]"),
+  serviceEnabled: q("[data-service-enabled]"),
+  serviceActive: q("[data-service-active]"),
+  servicePath: q("[data-service-path]"),
+  installService: q("[data-install-service]"),
+  serviceStart: q("[data-service-start]"),
+  serviceStop: q("[data-service-stop]"),
+  serviceRestart: q("[data-service-restart]"),
+  refreshService: q("[data-refresh-service]"),
+  serviceOutcome: q("[data-service-outcome]"),
+
+  // Diagnostics
+  diagService: q("[data-diag-service]"),
+  diagWriter: q("[data-diag-writer]"),
+  diagCapture: q("[data-diag-capture]"),
+  diagMode: q("[data-diag-mode]"),
+  diagBackend: q("[data-diag-backend]"),
+  diagFrames: q("[data-diag-frames]"),
+  diagNewest: q("[data-diag-newest]"),
+  diagStalls: q("[data-diag-stalls]"),
+  diagUsbfail: q("[data-diag-usbfail]"),
+  diagUsbrec: q("[data-diag-usbrec]"),
+  diagRate: q("[data-diag-rate]"),
+  diagRevision: q("[data-diag-revision]"),
+  copyDiag: q("[data-copy-diagnostics]"),
+  copyFeedback: q("[data-copy-feedback]"),
+
+  // About
+  aboutGui: q("[data-about-gui]"),
+  aboutApi: q("[data-about-api]"),
+  aboutBus: q("[data-about-bus]"),
+  aboutTarget: q("[data-about-target]"),
+  aboutDistro: q("[data-about-distro]"),
+  aboutSession: q("[data-about-session]"),
+  aboutDesktop: q("[data-about-desktop]"),
+  aboutKernel: q("[data-about-kernel]"),
+  copyVersion: q("[data-copy-version]"),
+  versionFeedback: q("[data-version-feedback]"),
 };
+
+// -- utilities --------------------------------------------------------
 
 function normalizeHex(value) {
   const upper = String(value).trim().toUpperCase();
@@ -61,16 +134,14 @@ function normalizeHex(value) {
   if (!match) throw new Error(`invalid hex color: ${value}`);
   return `#${match[1]}`;
 }
-
 function hexToRgb(hex) {
-  const normalized = normalizeHex(hex).slice(1);
+  const s = normalizeHex(hex).slice(1);
   return {
-    r: parseInt(normalized.slice(0, 2), 16),
-    g: parseInt(normalized.slice(2, 4), 16),
-    b: parseInt(normalized.slice(4, 6), 16),
+    r: parseInt(s.slice(0, 2), 16),
+    g: parseInt(s.slice(2, 4), 16),
+    b: parseInt(s.slice(4, 6), 16),
   };
 }
-
 function rgbToHex({ red, green, blue }) {
   return (
     "#" +
@@ -80,30 +151,71 @@ function rgbToHex({ red, green, blue }) {
       .toUpperCase()
   );
 }
-
 function confirmedColorForZone(zone) {
   if (!state.snapshot) return "#14C8F4";
   const entry = state.snapshot.confirmed_colors.find((z) => z.zone === zone);
-  if (!entry) return "#14C8F4";
-  return rgbToHex(entry.color);
+  return entry ? rgbToHex(entry.color) : "#14C8F4";
 }
-
 function manualSettingForZone(zone) {
   if (!state.snapshot) return null;
   return state.snapshot.manual_zones.find((z) => z.zone === zone) || null;
 }
-
 function mixedSelection(getter) {
-  const values = [...state.selected].map((zone) => getter(zone));
+  const values = [...state.selected].map(getter);
   if (values.length === 0) return null;
   const first = values[0];
   const mixed = values.some((v) => JSON.stringify(v) !== JSON.stringify(first));
   return mixed ? "mixed" : first;
 }
-
 function firstSelected() {
   return state.selected.values().next().value || null;
 }
+function zoneLabel(zone) {
+  return zone
+    .split("-")
+    .map((w) => w[0].toUpperCase() + w.slice(1))
+    .join(" ");
+}
+function backendLabel(backend) {
+  if (backend === "desktop-portal") return "Desktop Portal";
+  if (backend === "gamescope") return "Gamescope";
+  if (!backend) return "—";
+  return backend;
+}
+function healthClass(v) {
+  if (v === "ready") return "ok";
+  if (v === "recovering" || v === "starting") return "warn";
+  if (v === "failed" || v === "unavailable") return "error";
+  return "";
+}
+
+// -- page navigation --------------------------------------------------
+
+function switchPage(name) {
+  state.activePage = name;
+  els.rail.forEach((btn) => {
+    const active = btn.dataset.page === name;
+    btn.classList.toggle("active", active);
+    if (active) btn.setAttribute("aria-current", "page");
+    else btn.removeAttribute("aria-current");
+  });
+  els.pages.forEach((section) => {
+    const isActive = section.dataset.pageBody === name;
+    section.classList.toggle("active", isActive);
+    section.hidden = !isActive;
+  });
+  if (name === "setup") refreshSetup();
+  if (name === "diagnostics") renderDiagnostics();
+  if (name === "about") loadVersion();
+}
+
+function bindRail() {
+  els.rail.forEach((btn) => {
+    btn.addEventListener("click", () => switchPage(btn.dataset.page));
+  });
+}
+
+// -- render (Lighting + top status) -----------------------------------
 
 function render() {
   renderConnection();
@@ -115,6 +227,8 @@ function render() {
   renderBrightness();
   renderStage();
   renderSelectionCopy();
+  renderContentAware();
+  if (state.activePage === "diagnostics") renderDiagnostics();
 }
 
 function renderConnection() {
@@ -173,14 +287,15 @@ function renderMode() {
     tab.classList.toggle("active", active);
     tab.setAttribute("aria-selected", String(active));
   });
+  els.modePanels.manual.hidden = mode !== "manual";
+  els.modePanels["content-aware"].hidden = mode !== "content-aware";
   els.modeBadge.textContent =
     mode === "content-aware" ? "Content-Aware mode" : "Manual mode";
   els.liveLabel.textContent =
     mode === "content-aware" ? "Live capture" : "Newest value only";
   els.controls.classList.toggle(
     "locked",
-    mode === "content-aware" ||
-      (state.snapshot && !state.snapshot.lights_enabled),
+    state.snapshot && !state.snapshot.lights_enabled,
   );
 }
 
@@ -198,7 +313,6 @@ function renderZones() {
     }
   });
 }
-
 function renderGroups() {
   els.groups.forEach((btn) => {
     const group = GROUPS[btn.dataset.group];
@@ -208,14 +322,13 @@ function renderGroups() {
     btn.classList.toggle("active", active);
   });
 }
-
 function renderColor() {
   const setting = mixedSelection((zone) => {
     const s = manualSettingForZone(zone);
     return s ? rgbToHex(s.color) : "#14C8F4";
   });
   if (setting === "mixed") {
-    els.colorInput.value = state.pickerHex;
+    els.colorInput.value = state.pickerHex.toLowerCase();
     els.hexOutput.textContent = "MIXED";
     els.rgbOutput.innerHTML =
       "<span>R</span><b>—</b><span>G</span><b>—</b><span>B</span><b>—</b>";
@@ -228,7 +341,6 @@ function renderColor() {
   els.hexOutput.textContent = hex.slice(1);
   els.rgbOutput.innerHTML = `<span>R</span><b>${r}</b><span>G</span><b>${g}</b><span>B</span><b>${b}</b>`;
 }
-
 function renderBrightness() {
   const value = mixedSelection((zone) => {
     const s = manualSettingForZone(zone);
@@ -243,12 +355,8 @@ function renderBrightness() {
     els.brightnessInput.value = String(v);
     els.brightnessValue.textContent = `${v}%`;
   }
-  els.brightnessInput.style.setProperty(
-    "--pct",
-    `${els.brightnessInput.value}%`,
-  );
+  els.brightnessInput.style.setProperty("--pct", `${els.brightnessInput.value}%`);
 }
-
 function renderStage() {
   ZONES.forEach((zone) => {
     const color = confirmedColorForZone(zone);
@@ -258,7 +366,6 @@ function renderStage() {
     });
   });
 }
-
 function renderSelectionCopy() {
   const count = state.selected.size;
   const s = count === 1 ? "" : "s";
@@ -271,11 +378,13 @@ function renderSelectionCopy() {
   els.selectionCopy.textContent = label;
 }
 
-function zoneLabel(zone) {
-  return zone
-    .split("-")
-    .map((w) => w[0].toUpperCase() + w.slice(1))
-    .join(" ");
+function renderContentAware() {
+  const snap = state.snapshot;
+  els.caBackend.textContent = backendLabel(snap ? snap.capture_backend : null);
+  els.caCapture.textContent = snap ? snap.capture_health : "—";
+  const rate = snap ? snap.diagnostics.capture_rate_millihertz : 0;
+  els.caRate.textContent = rate > 0 ? `${(rate / 1000).toFixed(1)} fps` : "—";
+  els.caStalls.textContent = snap ? snap.diagnostics.capture_stalls : 0;
 }
 
 function showBanner(text) {
@@ -286,6 +395,8 @@ function hideBanner() {
   els.banner.hidden = true;
 }
 
+// -- IPC dispatch ------------------------------------------------------
+
 async function pushManualUpdates(zones, color, brightness) {
   if (zones.length === 0) return;
   const updates = zones.map((zone) => ({
@@ -295,14 +406,11 @@ async function pushManualUpdates(zones, color, brightness) {
   }));
   try {
     const result = await invoke("set_manual_zones", { updates });
-    if (result.status === "err") {
-      showBanner(`Rejected: ${result.error}`);
-    }
+    if (result.status === "err") showBanner(`Rejected: ${result.error}`);
   } catch (err) {
     showBanner(`Command failed: ${err}`);
   }
 }
-
 function hexToApiColor(hex) {
   const { r, g, b } = hexToRgb(hex);
   return { red: r, green: g, blue: b };
@@ -319,6 +427,8 @@ function currentZoneBrightness(zone) {
   return state.brightness;
 }
 
+// -- Lighting bindings -------------------------------------------------
+
 function bindZones() {
   els.zones.forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -329,7 +439,6 @@ function bindZones() {
     });
   });
 }
-
 function bindGroups() {
   els.groups.forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -338,7 +447,6 @@ function bindGroups() {
     });
   });
 }
-
 function bindColor() {
   els.colorInput.addEventListener("input", (event) => {
     state.pickerHex = normalizeHex(event.target.value);
@@ -352,7 +460,6 @@ function bindColor() {
     });
   });
 }
-
 function bindBrightness() {
   els.brightnessInput.addEventListener("input", () => {
     const value = Number(els.brightnessInput.value);
@@ -365,7 +472,6 @@ function bindBrightness() {
     pushManualUpdates([...state.selected], null, value);
   });
 }
-
 function bindMaster() {
   els.masterSwitch.addEventListener("click", async () => {
     const enabled = els.masterSwitch.getAttribute("aria-pressed") !== "true";
@@ -377,7 +483,6 @@ function bindMaster() {
     }
   });
 }
-
 function bindModeTabs() {
   els.modeTabs.forEach((tab) => {
     tab.addEventListener("click", async () => {
@@ -391,14 +496,272 @@ function bindModeTabs() {
     });
   });
 }
+function bindContentAware() {
+  els.chooseDisplay.addEventListener("click", async () => {
+    els.chooseDisplay.disabled = true;
+    try {
+      const result = await invoke("choose_desktop_display");
+      if (result.status === "err") showBanner(`Rejected: ${result.error}`);
+    } catch (err) {
+      showBanner(`Command failed: ${err}`);
+    } finally {
+      els.chooseDisplay.disabled = false;
+    }
+  });
+  els.restartCapture.addEventListener("click", async () => {
+    els.restartCapture.disabled = true;
+    try {
+      const result = await invoke("restart_capture");
+      if (result.status === "err") showBanner(`Rejected: ${result.error}`);
+    } catch (err) {
+      showBanner(`Command failed: ${err}`);
+    } finally {
+      els.restartCapture.disabled = false;
+    }
+  });
+}
+
+// -- Setup page --------------------------------------------------------
+
+function showOutcome(node, outcome) {
+  if (!outcome) {
+    node.hidden = true;
+    return;
+  }
+  node.hidden = false;
+  node.classList.remove("ok", "err");
+  if (outcome.status === "ok") {
+    node.classList.add("ok");
+    node.textContent = outcome.message;
+  } else {
+    node.classList.add("err");
+    node.textContent = outcome.error;
+  }
+}
+function statusClass(good) {
+  return good ? "ok" : "warn";
+}
+function statusText(good, yes = "yes", no = "no") {
+  return good ? yes : no;
+}
+
+async function refreshSetup() {
+  await Promise.all([loadUdev(), loadService()]);
+}
+async function loadUdev() {
+  try {
+    const status = await invoke("check_udev_status");
+    state.udev = status;
+    els.udevRule.textContent = statusText(status.rule_present, "installed", "missing");
+    els.udevRule.className = statusClass(status.rule_present);
+    els.udevDevice.textContent = statusText(status.device_present, "detected", "not detected");
+    els.udevDevice.className = statusClass(status.device_present);
+    els.udevWritable.textContent = statusText(
+      status.device_writable,
+      "yes",
+      status.device_present ? "no (rule may not have applied yet)" : "n/a",
+    );
+    els.udevWritable.className = statusClass(status.device_writable);
+  } catch (err) {
+    console.warn("check_udev_status failed", err);
+  }
+}
+async function loadService() {
+  try {
+    const status = await invoke("check_service_status");
+    state.serviceUnit = status;
+    els.serviceInstalled.textContent = statusText(status.unit_installed, "yes", "no");
+    els.serviceInstalled.className = statusClass(status.unit_installed);
+    els.serviceEnabled.textContent = statusText(status.enabled, "yes", "no");
+    els.serviceEnabled.className = statusClass(status.enabled);
+    els.serviceActive.textContent = statusText(status.active, "running", "stopped");
+    els.serviceActive.className = statusClass(status.active);
+    els.servicePath.textContent = status.unit_path || "—";
+  } catch (err) {
+    console.warn("check_service_status failed", err);
+  }
+}
+
+function bindSetup() {
+  els.installUdev.addEventListener("click", async () => {
+    els.installUdev.disabled = true;
+    showOutcome(els.udevOutcome, null);
+    try {
+      const outcome = await invoke("install_udev_rule");
+      showOutcome(els.udevOutcome, outcome);
+    } catch (err) {
+      showOutcome(els.udevOutcome, { status: "err", error: String(err) });
+    } finally {
+      els.installUdev.disabled = false;
+      await loadUdev();
+    }
+  });
+  els.refreshUdev.addEventListener("click", loadUdev);
+  els.installService.addEventListener("click", async () => {
+    els.installService.disabled = true;
+    showOutcome(els.serviceOutcome, null);
+    try {
+      const outcome = await invoke("install_service_unit");
+      showOutcome(els.serviceOutcome, outcome);
+    } catch (err) {
+      showOutcome(els.serviceOutcome, { status: "err", error: String(err) });
+    } finally {
+      els.installService.disabled = false;
+      await loadService();
+    }
+  });
+  const bindServiceAction = (btn, action) => {
+    btn.addEventListener("click", async () => {
+      btn.disabled = true;
+      try {
+        const outcome = await invoke("service_action", { action });
+        showOutcome(els.serviceOutcome, outcome);
+      } catch (err) {
+        showOutcome(els.serviceOutcome, { status: "err", error: String(err) });
+      } finally {
+        btn.disabled = false;
+        await loadService();
+      }
+    });
+  };
+  bindServiceAction(els.serviceStart, "start");
+  bindServiceAction(els.serviceStop, "stop");
+  bindServiceAction(els.serviceRestart, "restart");
+  els.refreshService.addEventListener("click", loadService);
+}
+
+// -- Diagnostics page --------------------------------------------------
+
+function renderDiagnostics() {
+  const snap = state.snapshot;
+  const setValue = (el, value, kls) => {
+    el.textContent = value == null || value === "" ? "—" : String(value);
+    el.className = "metric-value" + (kls ? " " + kls : "");
+  };
+  if (!snap) {
+    ["diagService", "diagWriter", "diagCapture", "diagMode", "diagBackend"].forEach((key) =>
+      setValue(els[key], "—", ""),
+    );
+    return;
+  }
+  setValue(els.diagService, snap.service_health, healthClass(snap.service_health));
+  setValue(els.diagWriter, snap.writer_health, healthClass(snap.writer_health));
+  setValue(els.diagCapture, snap.capture_health, healthClass(snap.capture_health));
+  setValue(els.diagMode, snap.mode, "");
+  setValue(els.diagBackend, backendLabel(snap.capture_backend), "");
+  setValue(els.diagFrames, snap.diagnostics.captured_frames, "");
+  setValue(els.diagNewest, snap.diagnostics.newest_value_replacements, "");
+  setValue(
+    els.diagStalls,
+    snap.diagnostics.capture_stalls,
+    snap.diagnostics.capture_stalls > 0 ? "warn" : "",
+  );
+  setValue(
+    els.diagUsbfail,
+    snap.diagnostics.usb_report_failures,
+    snap.diagnostics.usb_report_failures > 0 ? "warn" : "",
+  );
+  setValue(
+    els.diagUsbrec,
+    snap.diagnostics.usb_recoveries,
+    snap.diagnostics.usb_recoveries > 0 ? "warn" : "",
+  );
+  const rate = snap.diagnostics.capture_rate_millihertz;
+  setValue(els.diagRate, rate > 0 ? `${(rate / 1000).toFixed(1)} fps` : "—", "");
+  setValue(els.diagRevision, snap.revision, "");
+}
+
+function bindDiagnostics() {
+  els.copyDiag.addEventListener("click", async () => {
+    const snap = state.snapshot;
+    if (!snap) return;
+    const lines = [
+      `LogiLightShow diagnostic report`,
+      `revision=${snap.revision} mode=${snap.mode} lights_enabled=${snap.lights_enabled}`,
+      `backend=${backendLabel(snap.capture_backend)}`,
+      `service_health=${snap.service_health} writer_health=${snap.writer_health} capture_health=${snap.capture_health} device_health=${snap.device_health}`,
+      `captured_frames=${snap.diagnostics.captured_frames} newest_replacements=${snap.diagnostics.newest_value_replacements}`,
+      `capture_stalls=${snap.diagnostics.capture_stalls}`,
+      `usb_report_failures=${snap.diagnostics.usb_report_failures} usb_recoveries=${snap.diagnostics.usb_recoveries}`,
+      `capture_rate_mHz=${snap.diagnostics.capture_rate_millihertz}`,
+      `pending=${snap.pending}`,
+      `api_version=${snap.api_version}`,
+    ];
+    try {
+      await navigator.clipboard.writeText(lines.join("\n"));
+      els.copyFeedback.textContent = "Copied.";
+    } catch (err) {
+      els.copyFeedback.textContent = `Copy failed: ${err}`;
+    }
+    setTimeout(() => (els.copyFeedback.textContent = ""), 2000);
+  });
+}
+
+// -- About page --------------------------------------------------------
+
+async function loadVersion() {
+  if (state.version) {
+    fillVersion(state.version);
+    return;
+  }
+  try {
+    const v = await invoke("version_info");
+    state.version = v;
+    fillVersion(v);
+  } catch (err) {
+    console.warn("version_info failed", err);
+  }
+}
+function fillVersion(v) {
+  els.aboutGui.textContent = v.gui_version;
+  els.aboutApi.textContent = v.api_version;
+  els.aboutBus.textContent = v.bus_name;
+  els.aboutTarget.textContent = v.build_target;
+  els.aboutDistro.textContent = v.distribution || "unknown";
+  els.aboutSession.textContent = v.session_type || "unknown";
+  els.aboutDesktop.textContent = v.desktop || "unknown";
+  els.aboutKernel.textContent = v.kernel || "unknown";
+}
+function bindAbout() {
+  els.copyVersion.addEventListener("click", async () => {
+    const v = state.version;
+    if (!v) return;
+    const text = [
+      `LogiLightShow GUI ${v.gui_version} (API ${v.api_version})`,
+      `Bus: ${v.bus_name}`,
+      `Interface: ${v.interface_name}`,
+      `Build target: ${v.build_target}`,
+      `Distribution: ${v.distribution || "unknown"}`,
+      `Session: ${v.session_type || "unknown"}`,
+      `Desktop: ${v.desktop || "unknown"}`,
+      `Kernel: ${v.kernel || "unknown"}`,
+    ].join("\n");
+    try {
+      await navigator.clipboard.writeText(text);
+      els.versionFeedback.textContent = "Copied.";
+    } catch (err) {
+      els.versionFeedback.textContent = `Copy failed: ${err}`;
+    }
+    setTimeout(() => (els.versionFeedback.textContent = ""), 2000);
+  });
+}
+
+// -- bootstrap ---------------------------------------------------------
 
 async function bootstrap() {
+  bindRail();
   bindZones();
   bindGroups();
   bindColor();
   bindBrightness();
   bindMaster();
   bindModeTabs();
+  bindContentAware();
+  bindSetup();
+  bindDiagnostics();
+  bindAbout();
+
+  switchPage("lighting");
 
   await listen("snapshot-changed", (event) => {
     state.snapshot = event.payload;

@@ -1,0 +1,16 @@
+[Unit]
+Description=LogiLightShow ambient lighting for the desktop session
+Documentation=file:%h/.config/logilightshow/README
+After=graphical-session.target pipewire.service
+PartOf=graphical-session.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+ExecStart=@LOGILIGHTSHOW_BINARY@ run
+Restart=on-failure
+RestartSec=2s
+TimeoutStopSec=10s
+
+[Install]
+WantedBy=graphical-session.target

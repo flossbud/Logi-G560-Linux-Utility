@@ -91,6 +91,11 @@ async fn ready_message_lands_on_connect_and_manual_update_round_trips() {
                         Err(error) => RequestResult::Err { error },
                     }
                 }
+                ClientCommand::ChooseDesktopDisplay | ClientCommand::RestartCapture => {
+                    RequestResult::Ok {
+                        snapshot: model_handler.snapshot(),
+                    }
+                }
             };
             let _ = request.response.send(result);
         }
@@ -189,7 +194,11 @@ async fn invalid_manual_update_returns_api_error() {
                         Err(error) => RequestResult::Err { error },
                     }
                 }
-                _ => RequestResult::Ok {
+                ClientCommand::GetSnapshot
+                | ClientCommand::SetLightsEnabled { .. }
+                | ClientCommand::SetMode { .. }
+                | ClientCommand::ChooseDesktopDisplay
+                | ClientCommand::RestartCapture => RequestResult::Ok {
                     snapshot: model.snapshot(),
                 },
             };

@@ -74,6 +74,20 @@ pub async fn set_manual_zones(
 }
 
 #[tauri::command]
+pub async fn choose_desktop_display(
+    state: tauri::State<'_, ServiceClient>,
+) -> Result<CommandOutcome, ()> {
+    Ok(to_outcome(
+        state.send(ClientCommand::ChooseDesktopDisplay).await,
+    ))
+}
+
+#[tauri::command]
+pub async fn restart_capture(state: tauri::State<'_, ServiceClient>) -> Result<CommandOutcome, ()> {
+    Ok(to_outcome(state.send(ClientCommand::RestartCapture).await))
+}
+
+#[tauri::command]
 pub async fn get_connection_state(
     state: tauri::State<'_, ServiceClient>,
 ) -> Result<ConnectionState, ()> {
@@ -85,4 +99,70 @@ pub async fn get_cached_snapshot(
     state: tauri::State<'_, ServiceClient>,
 ) -> Result<Option<ServiceSnapshot>, ()> {
     Ok(state.current_snapshot().await)
+}
+
+#[tauri::command]
+pub async fn check_udev_status() -> Result<crate::setup::UdevStatus, ()> {
+    Ok(tokio::task::spawn_blocking(crate::setup::check_udev_status)
+        .await
+        .unwrap_or_else(|_| crate::setup::UdevStatus {
+            rule_present: false,
+            rule_path: String::new(),
+            device_present: false,
+            device_writable: false,
+        }))
+}
+
+#[tauri::command]
+pub async fn install_udev_rule() -> Result<crate::setup::ActionOutcome, ()> {
+    Ok(tokio::task::spawn_blocking(crate::setup::install_udev_rule)
+        .await
+        .unwrap_or_else(|err| crate::setup::ActionOutcome::Err {
+            error: format!("blocking task failed: {err}"),
+        }))
+}
+
+#[tauri::command]
+pub async fn check_service_status() -> Result<crate::setup::ServiceStatus, ()> {
+    Ok(
+        tokio::task::spawn_blocking(crate::setup::check_service_status)
+            .await
+            .unwrap_or_else(|_| crate::setup::ServiceStatus {
+                unit_installed: false,
+                unit_path: String::new(),
+                enabled: false,
+                active: false,
+                failed: false,
+                last_status: None,
+            }),
+    )
+}
+
+#[tauri::command]
+pub async fn install_service_unit() -> Result<crate::setup::ActionOutcome, ()> {
+    Ok(
+        tokio::task::spawn_blocking(crate::setup::install_service_unit)
+            .await
+            .unwrap_or_else(|err| crate::setup::ActionOutcome::Err {
+                error: format!("blocking task failed: {err}"),
+            }),
+    )
+}
+
+#[tauri::command]
+pub async fn service_action(action: String) -> Result<crate::setup::ActionOutcome, ()> {
+    Ok(
+        tokio::task::spawn_blocking(move || crate::setup::service_action(&action))
+            .await
+            .unwrap_or_else(|err| crate::setup::ActionOutcome::Err {
+                error: format!("blocking task failed: {err}"),
+            }),
+    )
+}
+
+#[tauri::command]
+pub async fn version_info() -> Result<crate::setup::VersionInfo, ()> {
+    Ok(tokio::task::spawn_blocking(crate::setup::version_info)
+        .await
+        .unwrap_or_else(|_| crate::setup::version_info()))
 }

@@ -4,6 +4,7 @@ use tracing_subscriber::EnvFilter;
 
 mod client;
 mod commands;
+mod setup;
 
 use client::{ServiceClient, default_socket_path};
 
@@ -72,8 +73,16 @@ fn main() {
             commands::set_lights_enabled,
             commands::set_mode,
             commands::set_manual_zones,
+            commands::choose_desktop_display,
+            commands::restart_capture,
             commands::get_connection_state,
             commands::get_cached_snapshot,
+            commands::check_udev_status,
+            commands::install_udev_rule,
+            commands::check_service_status,
+            commands::install_service_unit,
+            commands::service_action,
+            commands::version_info,
         ])
         .run(tauri::generate_context!())
         .expect("failed to launch LogiLightShow GUI");

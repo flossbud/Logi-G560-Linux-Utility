@@ -18,9 +18,23 @@ pub struct ClientRequest {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ClientCommand {
     GetSnapshot,
-    SetLightsEnabled { enabled: bool },
-    SetMode { mode: LightingMode },
-    SetManualZones { updates: Vec<ManualZoneUpdate> },
+    SetLightsEnabled {
+        enabled: bool,
+    },
+    SetMode {
+        mode: LightingMode,
+    },
+    SetManualZones {
+        updates: Vec<ManualZoneUpdate>,
+    },
+    /// Ask the service to re-open the desktop portal chooser, discarding
+    /// any previously saved restore token so the user selects a monitor
+    /// again. Only meaningful in Content-Aware mode on the Desktop Portal
+    /// backend.
+    ChooseDesktopDisplay,
+    /// Tear down and restart the active content-aware capture engine
+    /// without changing the saved backend, mode, or manual settings.
+    RestartCapture,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

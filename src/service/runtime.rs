@@ -17,8 +17,8 @@ use tracing::{debug, info, warn};
 use crate::{
     AppConfig, CaptureBackend, ConfigLoad, ConfigStore, ControllerModel, EngineMetrics,
     FileConfigStore, FrameSourceFactory, LightSink, LightUpdateStatus, LightingMode, ModelEffect,
-    RecoveringFrameSource, RecoveringLightSink, SamplerConfig, ServiceSnapshot, ZoneColors,
-    ZoneLayout,
+    RecoveringFrameSource, RecoveringLightSink, RecoveryMetrics, SamplerConfig, ServiceSnapshot,
+    ZoneColors, ZoneLayout,
     capture::{CaptureError, GStreamerFrameSource, GamescopeFrameSource, PortalCapture},
     config_path, run_engine_with_metrics,
     usb::{AsyncG560, G560, LibUsbTransport},
@@ -73,23 +73,13 @@ pub async fn run_service(options: ServiceOptions) -> Result<()> {
     let mut model = ControllerModel::new(config)
         .context("initial configuration failed controller validation")?;
 
-    let (snapshot_tx, snapshot_rx) = watch::channel(model.snapshot());
-    let (request_tx, mut request_rx) = mpsc::channel::<IpcRequest>(64);
-    let (proxy_tx, mut proxy_rx) = mpsc::channel::<ProxyCommand>(8);
-
+    let mut engine: Option<EngineHandle> = None;
     let socket_path = match socket_path {
         Some(path) => path,
         None => default_socket_path()?,
     };
     let listener = bind_listener(&socket_path)?;
     info!(socket = %socket_path.display(), "lighting service listening");
-
-    let accept_handle = tokio::spawn(run_accept_loop(
-        listener,
-        request_tx,
-        snapshot_rx.clone(),
-        shutdown.clone(),
-    ));
 
     let mut sink = RecoveringLightSink::new(
         || -> Result<AsyncG560<LibUsbTransport>> {
@@ -99,6 +89,19 @@ pub async fn run_service(options: ServiceOptions) -> Result<()> {
         },
         shutdown.clone(),
     );
+    let sink_metrics = sink.metrics();
+
+    let (snapshot_tx, snapshot_rx) =
+        watch::channel(augment_snapshot(&model, engine.as_ref(), &sink_metrics));
+    let (request_tx, mut request_rx) = mpsc::channel::<IpcRequest>(64);
+    let (proxy_tx, mut proxy_rx) = mpsc::channel::<ProxyCommand>(8);
+
+    let accept_handle = tokio::spawn(run_accept_loop(
+        listener,
+        request_tx,
+        snapshot_rx.clone(),
+        shutdown.clone(),
+    ));
 
     if let Err(err) = sink.write(ZoneColors::BLACK).await {
         cleanup_socket(&socket_path);
@@ -111,15 +114,22 @@ pub async fn run_service(options: ServiceOptions) -> Result<()> {
     }
     info!("G560 opened; initial safety blackout complete");
 
-    let mut engine: Option<EngineHandle> = None;
-
     match (model.config().lights_enabled, model.config().mode) {
         (true, LightingMode::Manual) => {
             let target = model.manual_target();
-            apply_manual_write(&mut model, &mut sink, target, &snapshot_tx).await;
+            apply_manual_write(
+                &mut model,
+                &mut sink,
+                target,
+                &snapshot_tx,
+                &sink_metrics,
+                &engine,
+            )
+            .await;
         }
         (true, LightingMode::ContentAware) => {
             engine = Some(start_engine(backend, &config_file, &proxy_tx, &shutdown));
+            publish_snapshot(&model, engine.as_ref(), &sink_metrics, &snapshot_tx);
         }
         (false, _) => {}
     }
@@ -127,6 +137,7 @@ pub async fn run_service(options: ServiceOptions) -> Result<()> {
     let loop_result = service_loop(
         &mut model,
         &mut sink,
+        &sink_metrics,
         &snapshot_tx,
         &mut request_rx,
         &mut proxy_rx,
@@ -158,6 +169,46 @@ pub async fn run_service(options: ServiceOptions) -> Result<()> {
 struct EngineHandle {
     task: JoinHandle<Result<()>>,
     cancel: CancellationToken,
+    metrics: EngineMetrics,
+    backend: CaptureBackend,
+}
+
+fn augment_snapshot(
+    model: &ControllerModel,
+    engine: Option<&EngineHandle>,
+    sink_metrics: &RecoveryMetrics,
+) -> ServiceSnapshot {
+    let mut snapshot = model.snapshot();
+    snapshot.capture_backend = engine.map(|h| h.backend);
+    if let Some(handle) = engine {
+        let engine_snap = handle.metrics.snapshot();
+        snapshot.diagnostics.captured_frames = engine_snap.captured_frames;
+        snapshot.diagnostics.newest_value_replacements = engine_snap.dropped_frames;
+        snapshot.diagnostics.capture_stalls = engine_snap.capture_stalls;
+        let elapsed_ms = engine_snap.elapsed.as_millis() as u64;
+        snapshot.diagnostics.capture_rate_millihertz = if elapsed_ms > 0 {
+            engine_snap
+                .captured_frames
+                .saturating_mul(1_000_000)
+                .checked_div(elapsed_ms)
+                .unwrap_or(0)
+        } else {
+            0
+        };
+    }
+    let sink_snap = sink_metrics.snapshot();
+    snapshot.diagnostics.usb_recoveries = sink_snap.reopen_count;
+    snapshot.diagnostics.usb_report_failures = sink_snap.usb_write_failures;
+    snapshot
+}
+
+fn publish_snapshot(
+    model: &ControllerModel,
+    engine: Option<&EngineHandle>,
+    sink_metrics: &RecoveryMetrics,
+    tx: &watch::Sender<ServiceSnapshot>,
+) {
+    let _ = tx.send(augment_snapshot(model, engine, sink_metrics));
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -167,6 +218,7 @@ async fn service_loop(
         impl FnMut() -> Result<AsyncG560<LibUsbTransport>> + Send,
         AsyncG560<LibUsbTransport>,
     >,
+    sink_metrics: &RecoveryMetrics,
     snapshot_tx: &watch::Sender<ServiceSnapshot>,
     request_rx: &mut mpsc::Receiver<IpcRequest>,
     proxy_rx: &mut mpsc::Receiver<ProxyCommand>,
@@ -188,7 +240,7 @@ async fn service_loop(
             _ = shutdown.cancelled() => return Ok(()),
             proxy = proxy_rx.recv() => {
                 let Some(command) = proxy else { continue };
-                dispatch_proxy_command(command, model, sink, snapshot_tx).await;
+                dispatch_proxy_command(command, model, sink, sink_metrics, snapshot_tx, engine.as_ref()).await;
             }
             request = request_rx.recv() => {
                 let Some(request) = request else { continue };
@@ -196,6 +248,7 @@ async fn service_loop(
                     request.request.command,
                     model,
                     sink,
+                    sink_metrics,
                     snapshot_tx,
                     engine,
                     config_store,
@@ -220,7 +273,7 @@ async fn service_loop(
                             {
                                 let _ = sink.blackout().await;
                                 model.record_failure();
-                                let _ = snapshot_tx.send(model.snapshot());
+                                publish_snapshot(model, engine.as_ref(), sink_metrics, snapshot_tx);
                             }
                         }
                     }
@@ -232,10 +285,11 @@ async fn service_loop(
                         {
                             let _ = sink.blackout().await;
                             model.record_failure();
-                            let _ = snapshot_tx.send(model.snapshot());
+                            publish_snapshot(model, engine.as_ref(), sink_metrics, snapshot_tx);
                         }
                     }
                 }
+                publish_snapshot(model, engine.as_ref(), sink_metrics, snapshot_tx);
             }
         }
     }
@@ -245,7 +299,9 @@ async fn dispatch_proxy_command<F>(
     command: ProxyCommand,
     model: &mut ControllerModel,
     sink: &mut RecoveringLightSink<F, AsyncG560<LibUsbTransport>>,
+    sink_metrics: &RecoveryMetrics,
     snapshot_tx: &watch::Sender<ServiceSnapshot>,
+    engine: Option<&EngineHandle>,
 ) where
     F: FnMut() -> Result<AsyncG560<LibUsbTransport>> + Send,
 {
@@ -256,12 +312,12 @@ async fn dispatch_proxy_command<F>(
             match &result {
                 Ok(LightUpdateStatus::Rendered) | Ok(LightUpdateStatus::Unchanged) => {
                     model.confirm_write(write.colors);
-                    let _ = snapshot_tx.send(model.snapshot());
+                    publish_snapshot(model, engine, sink_metrics, snapshot_tx);
                 }
                 Ok(LightUpdateStatus::Expired) => {}
                 Err(_) => {
                     model.record_failure();
-                    let _ = snapshot_tx.send(model.snapshot());
+                    publish_snapshot(model, engine, sink_metrics, snapshot_tx);
                 }
             }
             let _ = write.response.send(result);
@@ -270,7 +326,7 @@ async fn dispatch_proxy_command<F>(
             let result = sink.blackout().await;
             if result.is_ok() {
                 model.confirm_write(ZoneColors::BLACK);
-                let _ = snapshot_tx.send(model.snapshot());
+                publish_snapshot(model, engine, sink_metrics, snapshot_tx);
             }
             let _ = blackout.response.send(result);
         }
@@ -282,11 +338,13 @@ async fn apply_manual_write<F>(
     sink: &mut RecoveringLightSink<F, AsyncG560<LibUsbTransport>>,
     colors: ZoneColors,
     snapshot_tx: &watch::Sender<ServiceSnapshot>,
+    sink_metrics: &RecoveryMetrics,
+    engine: &Option<EngineHandle>,
 ) where
     F: FnMut() -> Result<AsyncG560<LibUsbTransport>> + Send,
 {
     model.mark_pending();
-    let _ = snapshot_tx.send(model.snapshot());
+    publish_snapshot(model, engine.as_ref(), sink_metrics, snapshot_tx);
     match sink.write(colors).await {
         Ok(()) => {
             model.confirm_write(colors);
@@ -296,7 +354,7 @@ async fn apply_manual_write<F>(
             model.record_failure();
         }
     }
-    let _ = snapshot_tx.send(model.snapshot());
+    publish_snapshot(model, engine.as_ref(), sink_metrics, snapshot_tx);
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -304,6 +362,7 @@ async fn handle_client_command<F>(
     command: ClientCommand,
     model: &mut ControllerModel,
     sink: &mut RecoveringLightSink<F, AsyncG560<LibUsbTransport>>,
+    sink_metrics: &RecoveryMetrics,
     snapshot_tx: &watch::Sender<ServiceSnapshot>,
     engine: &mut Option<EngineHandle>,
     config_store: &FileConfigStore,
@@ -318,7 +377,7 @@ where
     let effect = match command {
         ClientCommand::GetSnapshot => {
             return RequestResult::Ok {
-                snapshot: model.snapshot(),
+                snapshot: augment_snapshot(model, engine.as_ref(), sink_metrics),
             };
         }
         ClientCommand::SetLightsEnabled { enabled } => model.set_lights_enabled(enabled),
@@ -327,21 +386,44 @@ where
             Ok(effect) => effect,
             Err(err) => return RequestResult::Err { error: err },
         },
+        ClientCommand::ChooseDesktopDisplay => {
+            if backend != CaptureBackend::DesktopPortal {
+                return RequestResult::Ok {
+                    snapshot: augment_snapshot(model, engine.as_ref(), sink_metrics),
+                };
+            }
+            if let Err(err) = clear_restore_token(config_store) {
+                warn!(?err, "failed to clear portal restore token");
+            }
+            restart_engine(engine, backend, config_path, proxy_tx, shutdown).await;
+            publish_snapshot(model, engine.as_ref(), sink_metrics, snapshot_tx);
+            return RequestResult::Ok {
+                snapshot: augment_snapshot(model, engine.as_ref(), sink_metrics),
+            };
+        }
+        ClientCommand::RestartCapture => {
+            restart_engine(engine, backend, config_path, proxy_tx, shutdown).await;
+            publish_snapshot(model, engine.as_ref(), sink_metrics, snapshot_tx);
+            return RequestResult::Ok {
+                snapshot: augment_snapshot(model, engine.as_ref(), sink_metrics),
+            };
+        }
     };
 
     if let Err(err) = config_store.save(model.config()) {
         warn!(?err, "failed to persist configuration change");
     }
-    let _ = snapshot_tx.send(model.snapshot());
+    publish_snapshot(model, engine.as_ref(), sink_metrics, snapshot_tx);
 
     match effect {
         ModelEffect::NoWrite => {}
         ModelEffect::Write(colors) => {
-            apply_manual_write(model, sink, colors, snapshot_tx).await;
+            apply_manual_write(model, sink, colors, snapshot_tx, sink_metrics, engine).await;
         }
         ModelEffect::StartContentAware => {
             if engine.is_none() {
                 *engine = Some(start_engine(backend, config_path, proxy_tx, shutdown));
+                publish_snapshot(model, engine.as_ref(), sink_metrics, snapshot_tx);
             }
         }
         ModelEffect::StopContentAwareAndWrite(colors) => {
@@ -351,7 +433,7 @@ where
                     debug!(?err, "engine task join failed during mode change");
                 }
             }
-            apply_manual_write(model, sink, colors, snapshot_tx).await;
+            apply_manual_write(model, sink, colors, snapshot_tx, sink_metrics, engine).await;
         }
         ModelEffect::PriorityBlackout => {
             if let Some(handle) = engine.take() {
@@ -361,7 +443,7 @@ where
                 }
             }
             model.mark_pending();
-            let _ = snapshot_tx.send(model.snapshot());
+            publish_snapshot(model, engine.as_ref(), sink_metrics, snapshot_tx);
             match sink.blackout().await {
                 Ok(()) => {
                     model.confirm_write(ZoneColors::BLACK);
@@ -371,13 +453,42 @@ where
                     model.record_failure();
                 }
             }
-            let _ = snapshot_tx.send(model.snapshot());
+            publish_snapshot(model, engine.as_ref(), sink_metrics, snapshot_tx);
         }
     }
 
     RequestResult::Ok {
-        snapshot: model.snapshot(),
+        snapshot: augment_snapshot(model, engine.as_ref(), sink_metrics),
     }
+}
+
+async fn restart_engine(
+    engine: &mut Option<EngineHandle>,
+    backend: CaptureBackend,
+    config_path: &Path,
+    proxy_tx: &mpsc::Sender<ProxyCommand>,
+    shutdown: &CancellationToken,
+) {
+    if let Some(handle) = engine.take() {
+        handle.cancel.cancel();
+        if let Err(err) = handle.task.await {
+            debug!(?err, "engine task join failed during restart");
+        }
+    }
+    if shutdown.is_cancelled() {
+        return;
+    }
+    *engine = Some(start_engine(backend, config_path, proxy_tx, shutdown));
+}
+
+fn clear_restore_token(store: &FileConfigStore) -> Result<()> {
+    let load = store.load()?;
+    let mut config = load.into_config();
+    if config.restore_token.is_some() {
+        config.restore_token = None;
+        store.save(&config)?;
+    }
+    Ok(())
 }
 
 fn start_engine(
@@ -386,14 +497,21 @@ fn start_engine(
     proxy_tx: &mpsc::Sender<ProxyCommand>,
     shutdown: &CancellationToken,
 ) -> EngineHandle {
+    let metrics = EngineMetrics::new();
     let cancel = shutdown.child_token();
     let engine_cancel = cancel.clone();
     let proxy = ProxySink::new(proxy_tx.clone());
     let config_path = config_path.to_owned();
+    let engine_metrics = metrics.clone();
     let task = tokio::spawn(async move {
-        run_engine_backend(backend, config_path, proxy, engine_cancel).await
+        run_engine_backend(backend, config_path, proxy, engine_cancel, engine_metrics).await
     });
-    EngineHandle { task, cancel }
+    EngineHandle {
+        task,
+        cancel,
+        metrics,
+        backend,
+    }
 }
 
 async fn run_engine_backend(
@@ -401,6 +519,7 @@ async fn run_engine_backend(
     config_path: PathBuf,
     proxy: ProxySink,
     cancel: CancellationToken,
+    metrics: EngineMetrics,
 ) -> Result<()> {
     match backend {
         CaptureBackend::DesktopPortal => {
@@ -408,11 +527,11 @@ async fn run_engine_backend(
                 config_store: FileConfigStore::new(config_path),
                 has_opened: false,
             });
-            drive_engine(source, proxy, cancel).await
+            drive_engine(source, proxy, cancel, metrics).await
         }
         CaptureBackend::Gamescope => {
             let source = RecoveringFrameSource::new(GamescopeFrameSourceFactory);
-            drive_engine(source, proxy, cancel).await
+            drive_engine(source, proxy, cancel, metrics).await
         }
     }
 }
@@ -421,6 +540,7 @@ async fn drive_engine<F>(
     source: RecoveringFrameSource<F>,
     proxy: ProxySink,
     cancel: CancellationToken,
+    metrics: EngineMetrics,
 ) -> Result<()>
 where
     F: FrameSourceFactory + 'static,
@@ -432,7 +552,7 @@ where
         ZoneLayout::g560_default(),
         SamplerConfig::default(),
         cancel.cancelled_owned(),
-        EngineMetrics::new(),
+        metrics,
     )
     .await
     .map(|_| ())

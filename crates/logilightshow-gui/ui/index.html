@@ -42,157 +42,340 @@
             <span aria-hidden="true">✦</span>
             <span class="sr-only">Lighting</span>
           </button>
-          <button class="railitem" data-page="setup" disabled title="Coming in Phase 3">
+          <button class="railitem" data-page="setup">
             <span aria-hidden="true">⚙</span>
             <span class="sr-only">Setup &amp; Service</span>
           </button>
-          <button class="railitem" data-page="diagnostics" disabled title="Coming in Phase 3">
+          <button class="railitem" data-page="diagnostics">
             <span aria-hidden="true">⌁</span>
             <span class="sr-only">Diagnostics</span>
           </button>
-          <button class="railitem" data-page="about" disabled title="Coming in Phase 3">
+          <button class="railitem" data-page="about">
             <span aria-hidden="true">ⓘ</span>
             <span class="sr-only">About</span>
           </button>
         </nav>
-        <aside class="controls">
-          <h3>Lighting</h3>
-          <div class="tabs" role="tablist">
-            <button class="tab active" role="tab" data-mode-tab="manual" aria-selected="true">
-              Manual
-            </button>
-            <button class="tab" role="tab" data-mode-tab="content-aware" aria-selected="false">
-              Content-Aware
-            </button>
-          </div>
-          <div class="global-note">
-            Content-Aware Lighting is a global mode and always controls all four
-            zones.
-          </div>
 
-          <div class="eyebrow eyebrow-row">
-            <span>Select zones</span>
-            <span data-selection-count>4 zones selected</span>
-          </div>
-          <div class="groups">
-            <button class="group active" data-group="all">All</button>
-            <button class="group" data-group="fronts">Fronts</button>
-            <button class="group" data-group="rears">Rears</button>
-            <button class="group" data-group="left">Left</button>
-            <button class="group" data-group="right">Right</button>
-          </div>
-          <div class="zone-grid">
-            <button class="zone selected" data-zone="left-rear" aria-pressed="true">
-              <span>Left rear</span><i class="led"></i>
-            </button>
-            <button class="zone selected" data-zone="right-rear" aria-pressed="true">
-              <span>Right rear</span><i class="led"></i>
-            </button>
-            <button class="zone selected" data-zone="left-front" aria-pressed="true">
-              <span>Left front</span><i class="led"></i>
-            </button>
-            <button class="zone selected" data-zone="right-front" aria-pressed="true">
-              <span>Right front</span><i class="led"></i>
-            </button>
-          </div>
+        <!-- LIGHTING PAGE -->
+        <section class="page page-lighting" data-page-body="lighting">
+          <aside class="controls">
+            <h3>Lighting</h3>
+            <div class="tabs" role="tablist">
+              <button class="tab active" role="tab" data-mode-tab="manual" aria-selected="true">
+                Manual
+              </button>
+              <button class="tab" role="tab" data-mode-tab="content-aware" aria-selected="false">
+                Content-Aware
+              </button>
+            </div>
+            <div class="global-note">
+              Content-Aware Lighting is a global mode and always controls all
+              four zones.
+            </div>
 
-          <div class="eyebrow">Color</div>
-          <div class="picker-row">
-            <label class="colorwheel" title="Open the color picker">
+            <!-- Manual controls -->
+            <div class="mode-panel" data-mode-panel="manual">
+              <div class="eyebrow eyebrow-row">
+                <span>Select zones</span>
+                <span data-selection-count>4 zones selected</span>
+              </div>
+              <div class="groups">
+                <button class="group active" data-group="all">All</button>
+                <button class="group" data-group="fronts">Fronts</button>
+                <button class="group" data-group="rears">Rears</button>
+                <button class="group" data-group="left">Left</button>
+                <button class="group" data-group="right">Right</button>
+              </div>
+              <div class="zone-grid">
+                <button class="zone selected" data-zone="left-rear" aria-pressed="true">
+                  <span>Left rear</span><i class="led"></i>
+                </button>
+                <button class="zone selected" data-zone="right-rear" aria-pressed="true">
+                  <span>Right rear</span><i class="led"></i>
+                </button>
+                <button class="zone selected" data-zone="left-front" aria-pressed="true">
+                  <span>Left front</span><i class="led"></i>
+                </button>
+                <button class="zone selected" data-zone="right-front" aria-pressed="true">
+                  <span>Right front</span><i class="led"></i>
+                </button>
+              </div>
+              <div class="eyebrow">Color</div>
+              <div class="picker-row">
+                <label class="colorwheel" title="Open the color picker">
+                  <input
+                    data-color-input
+                    type="color"
+                    value="#14c8f4"
+                    aria-label="Color for selected zones"
+                  />
+                </label>
+                <div>
+                  <div class="rgb" data-rgb-output>
+                    <span>R</span><b>20</b><span>G</span><b>200</b><span>B</span
+                    ><b>244</b>
+                  </div>
+                  <div class="rgb rgb-hex">
+                    <span>#</span><b data-hex-output>14C8F4</b>
+                  </div>
+                </div>
+              </div>
+              <div class="palette">
+                <button data-palette-color="#14C8F4" aria-label="Cyan"></button>
+                <button data-palette-color="#FF2E64" aria-label="Pink"></button>
+                <button data-palette-color="#8D4CFF" aria-label="Purple"></button>
+                <button data-palette-color="#FF7A16" aria-label="Orange"></button>
+                <button data-palette-color="#FFFFFF" aria-label="White"></button>
+                <button data-palette-color="#F3C42D" aria-label="Yellow"></button>
+              </div>
+              <div class="eyebrow eyebrow-row">
+                <span>Brightness</span>
+                <span data-brightness-value>100%</span>
+              </div>
               <input
-                data-color-input
-                type="color"
-                value="#14c8f4"
-                aria-label="Color for selected zones"
+                class="slider"
+                type="range"
+                min="0"
+                max="100"
+                step="1"
+                value="100"
+                data-brightness-input
+                aria-label="Brightness for selected zones"
               />
-            </label>
-            <div>
-              <div class="rgb" data-rgb-output>
-                <span>R</span><b>20</b><span>G</span><b>200</b><span>B</span
-                ><b>244</b>
-              </div>
-              <div class="rgb rgb-hex">
-                <span>#</span><b data-hex-output>14C8F4</b>
-              </div>
             </div>
-          </div>
-          <div class="palette">
-            <button data-palette-color="#14C8F4" aria-label="Cyan"></button>
-            <button data-palette-color="#FF2E64" aria-label="Pink"></button>
-            <button data-palette-color="#8D4CFF" aria-label="Purple"></button>
-            <button data-palette-color="#FF7A16" aria-label="Orange"></button>
-            <button data-palette-color="#FFFFFF" aria-label="White"></button>
-            <button data-palette-color="#F3C42D" aria-label="Yellow"></button>
-          </div>
 
-          <div class="eyebrow eyebrow-row">
-            <span>Brightness</span>
-            <span data-brightness-value>100%</span>
-          </div>
-          <input
-            class="slider"
-            type="range"
-            min="0"
-            max="100"
-            step="1"
-            value="100"
-            data-brightness-input
-            aria-label="Brightness for selected zones"
-          />
-        </aside>
-        <main class="stage">
-          <div class="device-head">
-            <div class="device-title">
-              <strong>Logitech G560</strong
-              ><span>Four-zone speaker lighting</span>
-            </div>
-            <span class="status-badge" data-mode-badge>Manual mode</span>
-          </div>
-          <div class="hero">
-            <div class="hero-pair">
-              <div class="speaker-half">
-                <div
-                  class="rear-light-glow"
-                  data-light-zone="left-rear"
-                ></div>
-                <img
-                  class="speaker-image"
-                  src="assets/g560-left-front-neutral-soft-apex-v2.png"
-                  alt="Left G560 satellite"
-                />
-                <div
-                  class="light-tint left-front"
-                  data-light-zone="left-front"
-                ></div>
+            <!-- Content-Aware controls -->
+            <div class="mode-panel" data-mode-panel="content-aware" hidden>
+              <div class="eyebrow">Capture backend</div>
+              <div class="ca-summary">
+                <div class="ca-row">
+                  <span>Backend</span>
+                  <b data-ca-backend>Desktop Portal</b>
+                </div>
+                <div class="ca-row">
+                  <span>Capture</span>
+                  <b data-ca-capture>—</b>
+                </div>
+                <div class="ca-row">
+                  <span>Rate</span>
+                  <b data-ca-rate>—</b>
+                </div>
+                <div class="ca-row">
+                  <span>Stalls</span>
+                  <b data-ca-stalls>0</b>
+                </div>
               </div>
-              <div class="speaker-half">
-                <div
-                  class="rear-light-glow"
-                  data-light-zone="right-rear"
-                ></div>
-                <img
-                  class="speaker-image"
-                  src="assets/g560-right-front-neutral-soft-apex-v2.png"
-                  alt="Right G560 satellite"
-                />
-                <div
-                  class="light-tint right-front"
-                  data-light-zone="right-front"
-                ></div>
+              <div class="ca-actions">
+                <button class="pill primary" data-choose-display>
+                  Choose display…
+                </button>
+                <button class="pill" data-restart-capture>Restart capture</button>
+              </div>
+              <p class="ca-note">
+                Desktop Portal reopens the system monitor chooser. Gaming Mode
+                uses the direct Gamescope PipeWire node and does not use the
+                portal.
+              </p>
+            </div>
+          </aside>
+          <main class="stage">
+            <div class="device-head">
+              <div class="device-title">
+                <strong>Logitech G560</strong
+                ><span>Four-zone speaker lighting</span>
+              </div>
+              <span class="status-badge" data-mode-badge>Manual mode</span>
+            </div>
+            <div class="hero">
+              <div class="hero-pair">
+                <div class="speaker-half">
+                  <div class="rear-light-glow" data-light-zone="left-rear"></div>
+                  <img
+                    class="speaker-image"
+                    src="assets/g560-left-front-neutral-soft-apex-v2.png"
+                    alt="Left G560 satellite"
+                  />
+                  <div class="light-tint left-front" data-light-zone="left-front"></div>
+                </div>
+                <div class="speaker-half">
+                  <div class="rear-light-glow" data-light-zone="right-rear"></div>
+                  <img
+                    class="speaker-image"
+                    src="assets/g560-right-front-neutral-soft-apex-v2.png"
+                    alt="Right G560 satellite"
+                  />
+                  <div class="light-tint right-front" data-light-zone="right-front"></div>
+                </div>
               </div>
             </div>
-          </div>
-          <div class="stage-foot">
-            <div class="selected-copy">
-              <b data-selection-copy>All four zones</b> selected · changes apply
-              immediately
+            <div class="stage-foot">
+              <div class="selected-copy">
+                <b data-selection-copy>All four zones</b> selected · changes
+                apply immediately
+              </div>
+              <div class="live" data-live-label>Newest value only</div>
             </div>
-            <div class="live" data-live-label>Newest value only</div>
+            <div class="banner" data-banner hidden>
+              <span data-banner-text></span>
+            </div>
+          </main>
+        </section>
+
+        <!-- SETUP PAGE -->
+        <section class="page page-solo" data-page-body="setup" hidden>
+          <div class="page-inner">
+            <h2>Setup &amp; Service</h2>
+            <p class="page-lede">
+              Set up device access and the background service. Everything below
+              is safe to re-run.
+            </p>
+
+            <div class="card">
+              <h3>Speaker access (udev rule)</h3>
+              <p>
+                Grants your user session access to the G560's HID interface so
+                LogiLightShow can write colors without root.
+              </p>
+              <ul class="stat-list" data-udev-stats>
+                <li>Rule installed: <b data-udev-rule>checking…</b></li>
+                <li>G560 detected: <b data-udev-device>checking…</b></li>
+                <li>User can write: <b data-udev-writable>checking…</b></li>
+              </ul>
+              <div class="card-actions">
+                <button class="pill primary" data-install-udev>
+                  Install / repair udev rule
+                </button>
+                <button class="pill" data-refresh-udev>Recheck</button>
+              </div>
+              <div class="action-outcome" data-udev-outcome hidden></div>
+            </div>
+
+            <div class="card">
+              <h3>Background service (systemd user unit)</h3>
+              <p>
+                Installs a per-user systemd unit that keeps lighting running
+                even when the GUI is closed.
+              </p>
+              <ul class="stat-list" data-service-stats>
+                <li>Unit installed: <b data-service-installed>checking…</b></li>
+                <li>Enabled at login: <b data-service-enabled>checking…</b></li>
+                <li>Currently active: <b data-service-active>checking…</b></li>
+                <li>Unit path: <code data-service-path>—</code></li>
+              </ul>
+              <div class="card-actions">
+                <button class="pill primary" data-install-service>
+                  Install &amp; enable
+                </button>
+                <button class="pill" data-service-start>Start</button>
+                <button class="pill" data-service-stop>Stop</button>
+                <button class="pill" data-service-restart>Restart</button>
+                <button class="pill" data-refresh-service>Recheck</button>
+              </div>
+              <div class="action-outcome" data-service-outcome hidden></div>
+            </div>
           </div>
-          <div class="banner" data-banner hidden>
-            <span data-banner-text></span>
+        </section>
+
+        <!-- DIAGNOSTICS PAGE -->
+        <section class="page page-solo" data-page-body="diagnostics" hidden>
+          <div class="page-inner">
+            <h2>Diagnostics</h2>
+            <p class="page-lede">
+              Runtime health and color-free counters. Nothing here contains
+              captured imagery, sampled colors, or color history.
+            </p>
+
+            <div class="metric-grid">
+              <div class="metric">
+                <div class="metric-label">Service</div>
+                <div class="metric-value" data-diag-service>—</div>
+              </div>
+              <div class="metric">
+                <div class="metric-label">G560 writer</div>
+                <div class="metric-value" data-diag-writer>—</div>
+              </div>
+              <div class="metric">
+                <div class="metric-label">Capture</div>
+                <div class="metric-value" data-diag-capture>—</div>
+              </div>
+              <div class="metric">
+                <div class="metric-label">Mode</div>
+                <div class="metric-value" data-diag-mode>—</div>
+              </div>
+              <div class="metric">
+                <div class="metric-label">Backend</div>
+                <div class="metric-value" data-diag-backend>—</div>
+              </div>
+              <div class="metric">
+                <div class="metric-label">Frames captured</div>
+                <div class="metric-value" data-diag-frames>0</div>
+              </div>
+              <div class="metric">
+                <div class="metric-label">Newest replacements</div>
+                <div class="metric-value" data-diag-newest>0</div>
+              </div>
+              <div class="metric">
+                <div class="metric-label">Capture stalls</div>
+                <div class="metric-value" data-diag-stalls>0</div>
+              </div>
+              <div class="metric">
+                <div class="metric-label">USB report failures</div>
+                <div class="metric-value" data-diag-usbfail>0</div>
+              </div>
+              <div class="metric">
+                <div class="metric-label">USB recoveries</div>
+                <div class="metric-value" data-diag-usbrec>0</div>
+              </div>
+              <div class="metric">
+                <div class="metric-label">Capture rate</div>
+                <div class="metric-value" data-diag-rate>—</div>
+              </div>
+              <div class="metric">
+                <div class="metric-label">Revision</div>
+                <div class="metric-value" data-diag-revision>0</div>
+              </div>
+            </div>
+
+            <div class="card-actions">
+              <button class="pill primary" data-copy-diagnostics>
+                Copy diagnostic report
+              </button>
+              <span class="copy-feedback" data-copy-feedback></span>
+            </div>
           </div>
-        </main>
+        </section>
+
+        <!-- ABOUT PAGE -->
+        <section class="page page-solo" data-page-body="about" hidden>
+          <div class="page-inner">
+            <h2>About</h2>
+            <p class="page-lede">
+              LogiLightShow is a Linux-native lighting controller for the
+              Logitech G560 speaker set.
+            </p>
+            <ul class="stat-list" data-about-info>
+              <li>GUI version: <b data-about-gui>—</b></li>
+              <li>Service API version: <b data-about-api>—</b></li>
+              <li>Bus name: <code data-about-bus>—</code></li>
+              <li>Build target: <b data-about-target>—</b></li>
+              <li>Distribution: <b data-about-distro>—</b></li>
+              <li>Session type: <b data-about-session>—</b></li>
+              <li>Desktop: <b data-about-desktop>—</b></li>
+              <li>Kernel: <b data-about-kernel>—</b></li>
+            </ul>
+            <p class="page-lede">
+              This application stores no captured imagery, sampled colors,
+              color history, cloud accounts, or telemetry. All device access
+              is local.
+            </p>
+            <div class="card-actions">
+              <button class="pill primary" data-copy-version>
+                Copy version information
+              </button>
+              <span class="copy-feedback" data-version-feedback></span>
+            </div>
+          </div>
+        </section>
       </div>
     </div>
     <script src="app.js" type="module"></script>
