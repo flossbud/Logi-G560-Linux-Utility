@@ -171,13 +171,13 @@ fn systemctl_check(args: &[&str]) -> bool {
 }
 
 fn systemctl_status_line() -> Option<String> {
+    systemctl_status_line_for(SERVICE_UNIT_NAME)
+}
+
+fn systemctl_status_line_for(unit: &str) -> Option<String> {
     let output = Command::new("systemctl")
         .arg("--user")
-        .args([
-            "show",
-            "--property=ActiveState,SubState,Result",
-            SERVICE_UNIT_NAME,
-        ])
+        .args(["show", "--property=ActiveState,SubState,Result", unit])
         .output()
         .ok()?;
     if !output.status.success() {
@@ -236,6 +236,117 @@ pub fn install_service_unit() -> ActionOutcome {
         ));
     }
     ActionOutcome::ok(format!("service unit installed at {}", unit_path.display()))
+}
+
+const GAMING_UNIT_NAME: &str = "logig560-gaming.service";
+const GAMING_WANTS_DIR: &str = "gamescope-session-plus@steam.service.wants";
+
+pub fn gaming_unit_path() -> Result<PathBuf> {
+    let base = directories::BaseDirs::new().context("no user directories available")?;
+    Ok(base
+        .config_dir()
+        .join("systemd/user")
+        .join(GAMING_UNIT_NAME))
+}
+
+pub fn gaming_wants_symlink_path() -> Result<PathBuf> {
+    let base = directories::BaseDirs::new().context("no user directories available")?;
+    Ok(base
+        .config_dir()
+        .join("systemd/user")
+        .join(GAMING_WANTS_DIR)
+        .join(GAMING_UNIT_NAME))
+}
+
+pub fn check_gaming_service_status() -> ServiceStatus {
+    let unit_path = gaming_unit_path()
+        .map(|p| p.display().to_string())
+        .unwrap_or_default();
+    let unit_installed = gaming_unit_path().map(|p| p.is_file()).unwrap_or(false);
+    let enabled = systemctl_check(&["is-enabled", GAMING_UNIT_NAME]);
+    let active = systemctl_check(&["is-active", GAMING_UNIT_NAME]);
+    let failed = systemctl_check(&["is-failed", GAMING_UNIT_NAME]);
+    let last_status = systemctl_status_line_for(GAMING_UNIT_NAME);
+    ServiceStatus {
+        unit_installed,
+        unit_path,
+        enabled,
+        active,
+        failed,
+        last_status,
+    }
+}
+
+pub fn install_gaming_service_unit() -> ActionOutcome {
+    use crate::setup::launch::{
+        LaunchContext, detect_launch_context, ensure_launcher, home_bin_dir, render_gaming_unit,
+    };
+
+    let ctx = detect_launch_context();
+    let exec_target = match &ctx {
+        LaunchContext::AppImage { appimage_path } => {
+            let bin_dir = match home_bin_dir() {
+                Ok(p) => p,
+                Err(err) => return ActionOutcome::err(err),
+            };
+            match ensure_launcher(&bin_dir, appimage_path) {
+                Ok(path) => path,
+                Err(err) => return ActionOutcome::err(err),
+            }
+        }
+        LaunchContext::DevBuild { cli_binary } => {
+            if !cli_binary.is_file() {
+                return ActionOutcome::err(anyhow!(
+                    "service binary not found at {}; build it with `cargo build --release`",
+                    cli_binary.display()
+                ));
+            }
+            cli_binary.clone()
+        }
+    };
+
+    let unit_path = match gaming_unit_path() {
+        Ok(p) => p,
+        Err(err) => return ActionOutcome::err(err),
+    };
+    if let Some(parent) = unit_path.parent()
+        && let Err(err) = fs::create_dir_all(parent)
+    {
+        return ActionOutcome::err(anyhow!("create {}: {err}", parent.display()));
+    }
+    let contents = render_gaming_unit(&ctx, &exec_target);
+    if let Err(err) = write_private(&unit_path, contents.as_bytes()) {
+        return ActionOutcome::err(err);
+    }
+
+    // Enable via symlink (mirrors ./scripts/install-gaming-service.sh).
+    let wants = match gaming_wants_symlink_path() {
+        Ok(p) => p,
+        Err(err) => return ActionOutcome::err(err),
+    };
+    if let Some(parent) = wants.parent()
+        && let Err(err) = fs::create_dir_all(parent)
+    {
+        return ActionOutcome::err(anyhow!("create {}: {err}", parent.display()));
+    }
+    let _ = fs::remove_file(&wants);
+    if let Err(err) = std::os::unix::fs::symlink(&unit_path, &wants) {
+        return ActionOutcome::err(anyhow!("symlink {}: {err}", wants.display()));
+    }
+    if !run_systemctl(&["daemon-reload"]) {
+        return ActionOutcome::err(anyhow!("systemctl --user daemon-reload failed"));
+    }
+    // NOTE: we do NOT `--now` this in Desktop Mode; it must remain
+    // enabled-but-inactive until gamescope-session starts.
+    if !run_systemctl(&["enable", GAMING_UNIT_NAME]) {
+        return ActionOutcome::err(anyhow!(
+            "systemctl --user enable {GAMING_UNIT_NAME} failed"
+        ));
+    }
+    ActionOutcome::ok(format!(
+        "gaming unit installed at {} and enabled (inactive until Gaming Mode)",
+        unit_path.display()
+    ))
 }
 
 pub fn service_action(action: &str) -> ActionOutcome {

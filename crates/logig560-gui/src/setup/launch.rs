@@ -130,3 +130,13 @@ const DESKTOP_UNIT_TEMPLATE: &str =
 pub fn render_desktop_unit(_ctx: &LaunchContext, exec_target: &Path) -> String {
     DESKTOP_UNIT_TEMPLATE.replace("@LAUNCHER@", &exec_target.to_string_lossy())
 }
+
+/// Gaming unit template baked into the GUI binary.
+const GAMING_UNIT_TEMPLATE: &str =
+    include_str!("../../../../systemd/logig560-gaming.service.in");
+
+/// Substitute @LAUNCHER@ in the gaming unit template. `exec_target` is
+/// the launcher path (AppImage mode) or CLI binary path (dev mode).
+pub fn render_gaming_unit(_ctx: &LaunchContext, exec_target: &Path) -> String {
+    GAMING_UNIT_TEMPLATE.replace("@LAUNCHER@", &exec_target.to_string_lossy())
+}

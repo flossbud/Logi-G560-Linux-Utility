@@ -8,6 +8,7 @@ use std::path::PathBuf;
 
 use logig560_gui::setup::launch::{
     LaunchContext, detect_launch_context_with, ensure_launcher, render_desktop_unit,
+    render_gaming_unit,
 };
 
 #[test]
@@ -116,4 +117,18 @@ fn desktop_unit_dev_build_uses_binary_path() {
         "rendered unit missing dev ExecStart:\n{rendered}",
     );
     assert!(!rendered.contains("@LAUNCHER@"), "placeholder not substituted");
+}
+
+#[test]
+fn gaming_unit_appimage_uses_launcher_run_gaming() {
+    let ctx = LaunchContext::AppImage {
+        appimage_path: PathBuf::from("/home/user/G560.AppImage"),
+    };
+    let launcher = PathBuf::from("/home/user/.local/bin/logig560");
+    let rendered = render_gaming_unit(&ctx, &launcher);
+    assert!(
+        rendered.contains("ExecStart=/home/user/.local/bin/logig560 run-gaming"),
+        "rendered gaming unit missing launcher ExecStart:\n{rendered}",
+    );
+    assert!(rendered.contains("PartOf=gamescope-session-plus@steam.service"));
 }
