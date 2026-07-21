@@ -233,3 +233,26 @@ Do not export this globally on the accepted Bazzite machine; it produced black c
 | `/etc/udev/rules.d/70-g560.rules` | host USB access rule | root-owned `0644` |
 
 The capture config contains a version and opaque token, not pixels or monitor images.
+
+## Build the AppImage
+
+The distributable is built on Ubuntu 22.04 for glibc portability. To
+reproduce locally:
+
+```bash
+sudo apt-get install -y \
+  build-essential pkg-config \
+  libwebkit2gtk-4.1-dev libayatana-appindicator3-dev \
+  libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+  libgstreamer-plugins-bad1.0-dev gstreamer1.0-pipewire \
+  libpipewire-0.3-dev libusb-1.0-0-dev libgtk-3-dev libssl-dev \
+  patchelf desktop-file-utils fuse libfuse2
+
+./scripts/build-appimage.sh
+# → dist/G560-Linux-Utility-<version>-x86_64.AppImage
+```
+
+Building on Bazzite (via the `logig560` distrobox) is possible but the
+resulting AppImage is linked against Fedora 43's glibc and will not run
+on Ubuntu 22.04 / Debian 12 hosts. Use the Ubuntu recipe (or CI) for
+publishable builds.

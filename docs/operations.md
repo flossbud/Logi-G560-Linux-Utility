@@ -190,3 +190,24 @@ lsusb -d 046d:0a78
 ```
 
 On Desktop, the desired prototype state is Desktop active and Gaming enabled/inactive.
+
+## AppImage service launcher
+
+When the GUI installs a systemd user unit while running from an AppImage,
+it writes a small launcher script:
+
+```text
+~/.local/bin/logig560   # exec "/path/to/G560.AppImage" --cli "$@"
+```
+
+The generated `ExecStart=` in both `logig560-desktop.service` and
+`logig560-gaming.service` points at this launcher, not at the AppImage
+directly. This survives AppImage re-downloads to the same path.
+
+If you move or rename the AppImage, the launcher's embedded path becomes
+stale and the service will fail to start. The GUI detects this at launch
+and shows a **Re-link now** banner in **Setup & Service**.
+
+Dev builds (running `cargo run -p logig560-gui`) do not write a launcher
+script — the unit's `ExecStart=` points at `target/release/logig560`
+directly, matching the historical behavior.

@@ -14,8 +14,41 @@ A Linux alternative to Logitech G HUB for the Logitech G560 gaming speakers. Con
 
 - Accepted on Fedora GNOME Wayland, Bazzite 43 (Desktop Mode and Gaming Mode / Gamescope), and Arch Linux KDE Plasma 6 Wayland.
 - Milestone-one color behavior guarantees are for SDR content only. HDR is not yet validated.
-- Currently distributed as source only — no packaged builds yet. Build from source using the recipes below.
+- Distributed as a single-file AppImage for x86_64 Linux; source builds still supported for other targets.
 - Prototype-quality but in daily use by the developer.
+
+## Install via AppImage (recommended)
+
+1. Download the latest `G560-Linux-Utility-<version>-x86_64.AppImage` from
+   the [GitHub Releases page](https://github.com/YOUR_ORG/logig560/releases).
+2. Make it executable and run it:
+
+   ```bash
+   chmod +x G560-Linux-Utility-*-x86_64.AppImage
+   ./G560-Linux-Utility-*-x86_64.AppImage
+   ```
+
+3. In the GUI, open **Setup & Service**:
+   - Click **Install udev rule** (prompts pkexec) and reconnect your G560.
+   - Click **Install** under **Desktop service** to autostart lighting when
+     you log in.
+   - On Bazzite, also click **Install** under **Gaming Mode service** so
+     lighting works when Steam Gaming Mode starts.
+
+The AppImage bundles GStreamer + PipeWire client libs and webkit2gtk-4.1,
+so no additional distro packages are required. Requires a Wayland session
+with an XDG ScreenCast portal (GNOME, KDE) or a Bazzite Gamescope session.
+
+Command-line usage from the AppImage:
+
+```bash
+./G560-Linux-Utility-*.AppImage --cli capture-test --frames 30
+./G560-Linux-Utility-*.AppImage --cli run
+```
+
+If you move the AppImage after installing a service, the GUI shows a
+"AppImage was moved" banner in **Setup & Service** — one click re-links
+the launcher script to the new path.
 
 ## Requirements
 

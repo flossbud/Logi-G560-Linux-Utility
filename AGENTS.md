@@ -41,6 +41,7 @@ Do not weaken these invariants:
 - Preserve the physical zone mapping: logical `[left rear, left front, right front, right rear]` maps to protocol indexes `[0x02, 0x00, 0x01, 0x03]`.
 - Preserve clean shutdown: stop capture, request all-zone black, release USB, and close the portal/worker.
 - Desktop and Gaming Mode intentionally use different capture backends. Do not try to force the desktop portal into Gamescope.
+- The AppImage GUI writes `~/.local/bin/logig560` as a launcher shell script and points systemd `ExecStart=` at the launcher, not the transient AppImage mount path. Do not remove this indirection.
 
 ## Environment rules
 
@@ -106,6 +107,13 @@ cargo build --release
 bash -n scripts/*.sh
 systemd-analyze --user verify systemd/logig560-gaming.service
 git diff --check
+```
+
+For AppImage packaging changes:
+
+```bash
+bash -n scripts/build-appimage.sh
+python3 -c "import yaml; yaml.safe_load(open('.github/workflows/appimage.yml'))"
 ```
 
 Run Cargo commands inside the development container on Bazzite. Hardware checks are additional, not substitutes for automated checks. Never run destructive calibration or zone pulses while another G560 Linux Utility process owns the G560.
