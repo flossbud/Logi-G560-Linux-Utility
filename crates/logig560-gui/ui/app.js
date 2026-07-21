@@ -915,9 +915,9 @@ async function bootstrap() {
   }
   try {
     await listen("launcher-status", (event) => {
-      const report = event.payload;
-      if (!report || report.context !== "appimage") return;
-      const state = report.state;
+      const payload = event.payload;
+      if (!payload || payload.context !== "appimage") return;
+      const state = payload.state;
       if (state && state.state === "stale") {
         els.launcherOldPath.textContent = state.embedded || "";
         els.launcherBanner.hidden = false;

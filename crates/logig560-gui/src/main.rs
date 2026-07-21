@@ -76,12 +76,12 @@ fn main() {
 
             let launcher_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
-                let report = commands::verify_launcher_path().await.unwrap();
-                if matches!(
-                    report.state,
-                    logig560_gui::setup::launch::LauncherState::Stale { .. }
-                        | logig560_gui::setup::launch::LauncherState::Missing
-                ) && report.context == "appimage"
+                if let Ok(report) = commands::verify_launcher_path().await
+                    && report.context == "appimage"
+                    && matches!(
+                        report.state,
+                        logig560_gui::setup::launch::LauncherState::Stale { .. }
+                    )
                     && let Err(err) = launcher_handle.emit("launcher-status", &report)
                 {
                     warn!(?err, "failed to emit launcher-status");
