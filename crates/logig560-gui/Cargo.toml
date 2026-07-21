@@ -18,6 +18,9 @@ tokio = { version = "1.51", features = ["io-util", "macros", "net", "rt-multi-th
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
+[dev-dependencies]
+tempfile = "3.27"
+
 [features]
 custom-protocol = ["tauri/custom-protocol"]
 
