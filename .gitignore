@@ -8,3 +8,8 @@
 
 # Machine-specific handoff, kept local.
 /HANDOFF_BAZZITE.md
+
+# AppImage build outputs
+/dist/
+/.cache/appimage/
+/AppDir/
