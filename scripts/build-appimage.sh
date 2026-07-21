@@ -100,6 +100,14 @@ DESKTOP
 install -m 0644 "$APPDIR/usr/share/applications/logig560.desktop" "$APPDIR/logig560.desktop"
 
 echo ">>> Running linuxdeploy with gtk + gstreamer plugins"
+# Skip linuxdeploy's strip pass. The bundled strip is older than Arch's
+# binutils and does not understand the `.relr.dyn` section produced by
+# ld with --pack-relative-relocs, which causes strip to fail on every
+# Arch-sourced library. The unstripped AppImage is larger but works;
+# CI on Ubuntu 22.04 (older binutils) does not need this override to
+# succeed, so it is safe to always set.
+export NO_STRIP=true
+
 # Restrict the gstreamer plugin to the subset we actually load. Any plugin
 # listed in GSTREAMER_INCLUDE_LIBRARIES is copied; everything else is
 # skipped. Keep this in sync with the spec §1 subset list.

@@ -256,3 +256,15 @@ Building on Bazzite (via the `logig560` distrobox) is possible but the
 resulting AppImage is linked against Fedora 43's glibc and will not run
 on Ubuntu 22.04 / Debian 12 hosts. Use the Ubuntu recipe (or CI) for
 publishable builds.
+
+Building on Arch Linux also works for local testing but hits two
+distro-specific quirks:
+
+- `linuxdeploy`'s bundled `strip` cannot parse the `.relr.dyn` sections
+  Arch's binutils produces. The script sets `NO_STRIP=true` unconditionally,
+  which is harmless on Ubuntu.
+- `linuxdeploy-plugin-gtk` expects `/usr/lib/gdk-pixbuf-2.0/2.10.0/` to exist,
+  but Arch's `gdk-pixbuf2` package no longer ships that versioned loader
+  directory. The gtk plugin will exit non-zero at the "Installing GDK PixBufs"
+  step. There is no clean host-side workaround; use CI or a Fedora/Ubuntu
+  container for a real build.
