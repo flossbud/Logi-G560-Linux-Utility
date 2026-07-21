@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>LogiLightShow</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="gh-window" data-interactive-lighting>
+      <header class="gh-top">
+        <div class="brandmark">G<span class="brandmark-sub">560</span></div>
+        <div class="appname">
+          <strong>LogiLightShow</strong><span>for Linux</span>
+        </div>
+        <div class="service-line">
+          <span class="status-chip" data-service-status>
+            <i class="status-dot" data-service-dot></i
+            ><span data-service-label>Connecting…</span>
+          </span>
+          <span class="status-chip" data-device-status>
+            <i class="status-dot" data-device-dot></i
+            ><span data-device-label>G560 unknown</span>
+          </span>
+        </div>
+        <div class="master">
+          <span>LIGHTS</span>
+          <button
+            class="switch"
+            data-master-switch
+            aria-pressed="true"
+            aria-label="Master lights on/off"
+          >
+            <span class="switch-knob"></span>
+          </button>
+          <span data-master-label>ON</span>
+        </div>
+      </header>
+      <div class="gh-body">
+        <nav class="rail" aria-label="Primary">
+          <button class="railitem active" data-page="lighting" aria-current="page">
+            <span aria-hidden="true">✦</span>
+            <span class="sr-only">Lighting</span>
+          </button>
+          <button class="railitem" data-page="setup" disabled title="Coming in Phase 3">
+            <span aria-hidden="true">⚙</span>
+            <span class="sr-only">Setup &amp; Service</span>
+          </button>
+          <button class="railitem" data-page="diagnostics" disabled title="Coming in Phase 3">
+            <span aria-hidden="true">⌁</span>
+            <span class="sr-only">Diagnostics</span>
+          </button>
+          <button class="railitem" data-page="about" disabled title="Coming in Phase 3">
+            <span aria-hidden="true">ⓘ</span>
+            <span class="sr-only">About</span>
+          </button>
+        </nav>
+        <aside class="controls">
+          <h3>Lighting</h3>
+          <div class="tabs" role="tablist">
+            <button class="tab active" role="tab" data-mode-tab="manual" aria-selected="true">
+              Manual
+            </button>
+            <button class="tab" role="tab" data-mode-tab="content-aware" aria-selected="false">
+              Content-Aware
+            </button>
+          </div>
+          <div class="global-note">
+            Content-Aware Lighting is a global mode and always controls all four
+            zones.
+          </div>
+
+          <div class="eyebrow eyebrow-row">
+            <span>Select zones</span>
+            <span data-selection-count>4 zones selected</span>
+          </div>
+          <div class="groups">
+            <button class="group active" data-group="all">All</button>
+            <button class="group" data-group="fronts">Fronts</button>
+            <button class="group" data-group="rears">Rears</button>
+            <button class="group" data-group="left">Left</button>
+            <button class="group" data-group="right">Right</button>
+          </div>
+          <div class="zone-grid">
+            <button class="zone selected" data-zone="left-rear" aria-pressed="true">
+              <span>Left rear</span><i class="led"></i>
+            </button>
+            <button class="zone selected" data-zone="right-rear" aria-pressed="true">
+              <span>Right rear</span><i class="led"></i>
+            </button>
+            <button class="zone selected" data-zone="left-front" aria-pressed="true">
+              <span>Left front</span><i class="led"></i>
+            </button>
+            <button class="zone selected" data-zone="right-front" aria-pressed="true">
+              <span>Right front</span><i class="led"></i>
+            </button>
+          </div>
+
+          <div class="eyebrow">Color</div>
+          <div class="picker-row">
+            <label class="colorwheel" title="Open the color picker">
+              <input
+                data-color-input
+                type="color"
+                value="#14c8f4"
+                aria-label="Color for selected zones"
+              />
+            </label>
+            <div>
+              <div class="rgb" data-rgb-output>
+                <span>R</span><b>20</b><span>G</span><b>200</b><span>B</span
+                ><b>244</b>
+              </div>
+              <div class="rgb rgb-hex">
+                <span>#</span><b data-hex-output>14C8F4</b>
+              </div>
+            </div>
+          </div>
+          <div class="palette">
+            <button data-palette-color="#14C8F4" aria-label="Cyan"></button>
+            <button data-palette-color="#FF2E64" aria-label="Pink"></button>
+            <button data-palette-color="#8D4CFF" aria-label="Purple"></button>
+            <button data-palette-color="#FF7A16" aria-label="Orange"></button>
+            <button data-palette-color="#FFFFFF" aria-label="White"></button>
+            <button data-palette-color="#F3C42D" aria-label="Yellow"></button>
+          </div>
+
+          <div class="eyebrow eyebrow-row">
+            <span>Brightness</span>
+            <span data-brightness-value>100%</span>
+          </div>
+          <input
+            class="slider"
+            type="range"
+            min="0"
+            max="100"
+            step="1"
+            value="100"
+            data-brightness-input
+            aria-label="Brightness for selected zones"
+          />
+        </aside>
+        <main class="stage">
+          <div class="device-head">
+            <div class="device-title">
+              <strong>Logitech G560</strong
+              ><span>Four-zone speaker lighting</span>
+            </div>
+            <span class="status-badge" data-mode-badge>Manual mode</span>
+          </div>
+          <div class="hero">
+            <div class="hero-pair">
+              <div class="speaker-half">
+                <div
+                  class="rear-light-glow"
+                  data-light-zone="left-rear"
+                ></div>
+                <img
+                  class="speaker-image"
+                  src="assets/g560-left-front-neutral-soft-apex-v2.png"
+                  alt="Left G560 satellite"
+                />
+                <div
+                  class="light-tint left-front"
+                  data-light-zone="left-front"
+                ></div>
+              </div>
+              <div class="speaker-half">
+                <div
+                  class="rear-light-glow"
+                  data-light-zone="right-rear"
+                ></div>
+                <img
+                  class="speaker-image"
+                  src="assets/g560-right-front-neutral-soft-apex-v2.png"
+                  alt="Right G560 satellite"
+                />
+                <div
+                  class="light-tint right-front"
+                  data-light-zone="right-front"
+                ></div>
+              </div>
+            </div>
+          </div>
+          <div class="stage-foot">
+            <div class="selected-copy">
+              <b data-selection-copy>All four zones</b> selected · changes apply
+              immediately
+            </div>
+            <div class="live" data-live-label>Newest value only</div>
+          </div>
+          <div class="banner" data-banner hidden>
+            <span data-banner-text></span>
+          </div>
+        </main>
+      </div>
+    </div>
+    <script src="app.js" type="module"></script>
+  </body>
+</html>

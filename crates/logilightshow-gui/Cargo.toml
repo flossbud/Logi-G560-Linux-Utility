@@ -1,0 +1,26 @@
+[package]
+name = "logilightshow-gui"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97.1"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+anyhow = "1.0"
+directories = "6"
+logilightshow-api = { path = "../logilightshow-api" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tauri = { version = "2", features = [] }
+tokio = { version = "1.51", features = ["io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[features]
+custom-protocol = ["tauri/custom-protocol"]
+
+[[bin]]
+name = "logilightshow-gui"
+path = "src/main.rs"

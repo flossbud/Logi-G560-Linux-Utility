@@ -5,7 +5,7 @@ edition = "2024"
 rust-version = "1.97.1"
 
 [workspace]
-members = [".", "crates/logilightshow-api"]
+members = [".", "crates/logilightshow-api", "crates/logilightshow-gui"]
 resolver = "3"
 
 [dependencies]

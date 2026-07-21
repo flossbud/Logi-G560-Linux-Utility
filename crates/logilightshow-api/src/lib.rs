@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use zvariant::Type;
 
+pub mod protocol;
+
 pub const API_VERSION: u32 = 1;
 pub const BUS_NAME: &str = "org.logilightshow.Service1";
 pub const OBJECT_PATH: &str = "/org/logilightshow/Service1";
