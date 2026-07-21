@@ -940,3 +940,21 @@ body {
   border-radius: 3px;
   z-index: 4;
 }
+
+/* AppImage launcher-stale banner (Setup & Service page). */
+.banner {
+  background: rgba(217, 119, 6, 0.12);
+  border-left: 4px solid #d97706;
+  padding: 0.85rem 1rem;
+  margin-bottom: 1.25rem;
+  border-radius: 6px;
+  color: inherit;
+}
+.banner p {
+  margin: 0 0 0.5rem;
+}
+.banner code {
+  background: rgba(0, 0, 0, 0.06);
+  padding: 0 0.25rem;
+  border-radius: 3px;
+}

@@ -267,6 +267,18 @@
               is safe to re-run.
             </p>
 
+            <aside class="banner" data-launcher-banner hidden>
+              <p>
+                The AppImage has moved since the service was installed.
+                The current launcher script points at
+                <code data-launcher-old-path></code>.
+                Click below to re-link it to the current AppImage.
+              </p>
+              <div class="card-actions">
+                <button class="pill primary" data-relink-launcher>Re-link now</button>
+              </div>
+            </aside>
+
             <div class="card">
               <h3>Speaker access (udev rule)</h3>
               <p>
@@ -303,12 +315,35 @@
                 <button class="pill primary" data-install-service>
                   Install &amp; enable
                 </button>
+                <button class="pill" data-uninstall-service>Uninstall</button>
                 <button class="pill" data-service-start>Start</button>
                 <button class="pill" data-service-stop>Stop</button>
                 <button class="pill" data-service-restart>Restart</button>
                 <button class="pill" data-refresh-service>Recheck</button>
               </div>
               <div class="action-outcome" data-service-outcome hidden></div>
+            </div>
+
+            <div class="card" data-service-card="gaming">
+              <h3>Gaming Mode service <small>(Bazzite Gamescope)</small></h3>
+              <p>
+                Enabled in Desktop Mode but only activates when Steam
+                Gaming Mode starts (via
+                <code>gamescope-session-plus@steam.service</code>).
+              </p>
+              <ul class="stat-list" data-gaming-stats>
+                <li>Unit installed: <b data-gaming-installed>checking…</b></li>
+                <li>Enabled at login: <b data-gaming-enabled>checking…</b></li>
+                <li>Currently active: <b data-gaming-active>checking…</b></li>
+              </ul>
+              <div class="card-actions">
+                <button class="pill primary" data-install-gaming>
+                  Install &amp; enable
+                </button>
+                <button class="pill" data-uninstall-gaming>Uninstall</button>
+                <button class="pill" data-refresh-gaming>Recheck</button>
+              </div>
+              <div class="action-outcome" data-gaming-outcome hidden></div>
             </div>
           </div>
         </section>
