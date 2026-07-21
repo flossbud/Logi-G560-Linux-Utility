@@ -1,0 +1,15 @@
+[Unit]
+Description=G560 Linux Utility ambient lighting for Bazzite Gaming Mode
+After=pipewire.service gamescope-session-plus@steam.service
+PartOf=gamescope-session-plus@steam.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+ExecStart=@LAUNCHER@ run-gaming
+Restart=on-failure
+RestartSec=2s
+TimeoutStopSec=10s
+
+[Install]
+WantedBy=gamescope-session-plus@steam.service
