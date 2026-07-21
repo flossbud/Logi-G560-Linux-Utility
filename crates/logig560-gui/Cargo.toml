@@ -24,6 +24,10 @@ tempfile = "3.27"
 [features]
 custom-protocol = ["tauri/custom-protocol"]
 
+[lib]
+name = "logig560_gui"
+path = "src/lib.rs"
+
 [[bin]]
 name = "logig560-gui"
 path = "src/main.rs"

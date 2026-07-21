@@ -2,6 +2,8 @@
 //! (systemd user session, udev rules) but never talk to the lighting
 //! service socket. They are safe to invoke while the service is running.
 
+pub mod launch;
+
 use std::{
     env, fs,
     io::Write,
