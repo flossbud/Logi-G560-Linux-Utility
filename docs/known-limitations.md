@@ -6,12 +6,12 @@
 - No GUI, tray application, D-Bus API, pause toggle, or user-facing status model.
 - No permanent Desktop autostart service; Desktop acceptance uses a foreground or transient user unit.
 - No installer/package that combines binary, user units, desktop integration, and udev setup.
-- Gaming service assumes the repository remains at `%h/Documents/LogiLightShow`.
+- Gaming service assumes the repository remains at `%h/Documents/G560 Linux Utility`.
 
 ## Platform coverage
 
 - Accepted primarily on GNOME Wayland and Bazzite's Gamescope session.
-- KDE is an intended target but lacks equivalent final acceptance evidence in this workspace.
+- Arch Linux KDE Plasma 6 Wayland has non-black portal-capture and short live-engine evidence, but still lacks the longer lock/unlock, suspend, audio-soak, and subjective visual acceptance performed on Bazzite.
 - X11 is not a target.
 - Other compositors may expose different portal or PipeWire behavior.
 - Other G560 firmware revisions and USB layouts are not broadly tested.
@@ -55,8 +55,7 @@
 
 ## Development and delivery
 
-- Accepted Bazzite work is uncommitted in the original workspace.
-- No configured upstream remote in that workspace.
+- The accepted Bazzite port is committed locally, but the workspace still has no configured upstream remote.
 - No CI workflow.
 - No automated dependency/security audit.
 - No automated Markdown link/lint gate.
@@ -65,13 +64,13 @@
 
 ## Suggested next milestones
 
-1. Commit the accepted Bazzite port in a reviewable series.
-2. Add CI for format, Clippy, tests, shell syntax, and systemd verification.
+1. Add CI for format, Clippy, tests, shell syntax, and systemd verification.
+2. Complete extended KDE lock/suspend/audio and user visual acceptance.
 3. Create relocatable packaging and a persistent Desktop user service.
 4. Add a small control/status API and UI without moving capture/USB into privileged code.
 5. Expose safe user configuration for monitor selection, brightness, darkness behavior, and transitions.
 6. Add structured health metrics, including held-frame and stall-cause visibility.
-7. Validate KDE, additional GPUs, HDR behavior, and other firmware revisions.
+7. Validate additional GPUs, HDR behavior, and other firmware revisions.
 8. Define an explicit PipeWire liveness signal that distinguishes valid static content from a silently wedged source.
 
 Future work must retain the invariants in `AGENTS.md`, especially one-monitor authority, no-root runtime, no saved frames, latest-only flow, USB cadence, and immediate safety blackout.

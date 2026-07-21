@@ -59,7 +59,7 @@ impl GamescopeFrameSource {
         let worker_error_sender = error_sender.clone();
 
         let worker = thread::Builder::new()
-            .name("logilightshow-pipewire".to_owned())
+            .name("logig560-pipewire".to_owned())
             .spawn(move || {
                 if let Err(message) = run_worker(
                     frame_sender,
@@ -168,13 +168,13 @@ fn run_worker(
 
     let stream = pw::stream::StreamBox::new(
         &core,
-        "LogiLightShow Gamescope capture",
+        "G560 Linux Utility Gamescope capture",
         properties! {
             *pw::keys::MEDIA_TYPE => "Video",
             *pw::keys::MEDIA_CATEGORY => "Capture",
             *pw::keys::MEDIA_ROLE => "Screen",
             *pw::keys::TARGET_OBJECT => GAMESCOPE_NODE_NAME,
-            *pw::keys::NODE_NAME => "logilightshow-gamescope-capture",
+            *pw::keys::NODE_NAME => "logig560-gamescope-capture",
         },
     )
     .map_err(display)?;

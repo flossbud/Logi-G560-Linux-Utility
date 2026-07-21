@@ -36,7 +36,7 @@ systemctl --user is-active gamescope-session-plus@steam.service || true
 
 Classify the target:
 
-- mutable Fedora-like desktop;
+- mutable Fedora-like or Arch desktop;
 - immutable Bazzite/Silverblue desktop;
 - Gamescope Gaming Mode;
 - unsupported X11/non-PipeWire context.
@@ -93,6 +93,7 @@ Desktop:
 ```bash
 systemctl --user status xdg-desktop-portal.service --no-pager || true
 systemctl --user status xdg-desktop-portal-gnome.service --no-pager || true
+systemctl --user status plasma-xdg-desktop-portal-kde.service --no-pager || true
 gst-inspect-1.0 pipewiresrc videoconvert videoscale
 ```
 
@@ -110,13 +111,13 @@ Do not use the Desktop portal backend in a Gamescope session that does not provi
 Before opening USB, test capture only:
 
 ```bash
-./target/release/logilightshow capture-test --frames 30
+./target/release/logig560 capture-test --frames 30
 ```
 
 or, in Gaming Mode:
 
 ```bash
-./target/release/logilightshow capture-test --gamescope --frames 30
+./target/release/logig560 capture-test --gamescope --frames 30
 ```
 
 Confirm frames are non-black for visible content and dimensions are plausible. The command prints sampled colors but saves no images.

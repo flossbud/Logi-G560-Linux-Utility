@@ -2,7 +2,7 @@
 
 ## Thirty-second summary
 
-LogiLightShow captures one screen, reduces it to four zone colors, smoothly transitions the Logitech G560 lights, and immediately blacks them on safety events. Desktop uses portal+GStreamer; Bazzite Gaming uses direct Gamescope PipeWire. The accepted Bazzite changes are intentionally uncommitted in the original workspace.
+G560 Linux Utility captures one screen, reduces it to four zone colors, smoothly transitions the Logitech G560 lights, and immediately blacks them on safety events. Desktop uses portal+GStreamer; Bazzite Gaming uses direct Gamescope PipeWire. The accepted Bazzite changes are intentionally uncommitted in the original workspace.
 
 ## First commands
 
@@ -10,31 +10,31 @@ LogiLightShow captures one screen, reduces it to four zone colors, smoothly tran
 git status --short
 cat AGENTS.md
 sed -n '1,220p' docs/project-status.md
-./target/release/logilightshow --help
+./target/release/logig560 --help
 ```
 
 On Bazzite, build/test in:
 
 ```bash
-distrobox enter logilightshow -- bash -lc \
-  'cd /home/jaret/Documents/LogiLightShow && cargo test --all-targets'
+distrobox enter logig560 -- bash -lc \
+  'cd /home/jaret/Documents/G560 Linux Utility && cargo test --all-targets'
 ```
 
 ## Runtime commands
 
 ```bash
 # Desktop
-./target/release/logilightshow run
+./target/release/logig560 run
 
 # Gaming Mode (normally service-managed)
-./target/release/logilightshow run-gaming
+./target/release/logig560 run-gaming
 
 # Capture only; saves no image
-./target/release/logilightshow capture-test --saved-permission --frames 30
-./target/release/logilightshow capture-test --gamescope --frames 30
+./target/release/logig560 capture-test --saved-permission --frames 30
+./target/release/logig560 capture-test --gamescope --frames 30
 
 # Static USB isolation
-./target/release/logilightshow set-zones \
+./target/release/logig560 set-zones \
   --left-rear FF0000 --left-front 00FF00 \
   --right-front 0000FF --right-rear FFFFFF
 ```
@@ -42,10 +42,10 @@ distrobox enter logilightshow -- bash -lc \
 ## Service commands
 
 ```bash
-systemctl --user status logilightshow-desktop-live.service --no-pager
-journalctl --user -u logilightshow-desktop-live.service -f
-systemctl --user is-enabled logilightshow-gaming.service
-journalctl --user -u logilightshow-gaming.service -b --no-pager
+systemctl --user status logig560-desktop-live.service --no-pager
+journalctl --user -u logig560-desktop-live.service -f
+systemctl --user is-enabled logig560-gaming.service
+journalctl --user -u logig560-gaming.service -b --no-pager
 ```
 
 Gaming should be enabled/inactive on Desktop.
@@ -96,7 +96,7 @@ cargo clippy --all-targets -- -D warnings
 cargo test --all-targets
 cargo build --release
 bash -n scripts/*.sh
-systemd-analyze --user verify systemd/logilightshow-gaming.service
+systemd-analyze --user verify systemd/logig560-gaming.service
 git diff --check
 ```
 

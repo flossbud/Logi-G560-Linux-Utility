@@ -5,7 +5,7 @@ use std::{
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use logilightshow::{
+use logig560::{
     CaptureBackend, ConfigStore, FileConfigStore, FrameSource, Rgb8, SamplerConfig, ZoneColors,
     ZoneLayout, ZoneMasks,
     capture::{GStreamerFrameSource, GamescopeFrameSource, PortalCapture},
@@ -311,20 +311,20 @@ mod tests {
 
     #[test]
     fn parses_run_command() {
-        let cli = Cli::try_parse_from(["logilightshow", "run"]).unwrap();
+        let cli = Cli::try_parse_from(["logig560", "run"]).unwrap();
         assert!(matches!(cli.command, Command::Run));
     }
 
     #[test]
     fn parses_run_gaming_command() {
-        let cli = Cli::try_parse_from(["logilightshow", "run-gaming"]).unwrap();
+        let cli = Cli::try_parse_from(["logig560", "run-gaming"]).unwrap();
         assert!(matches!(cli.command, Command::RunGaming));
     }
 
     #[test]
     fn calibration_cli_requires_positive_delay_and_duration() {
         let cli = Cli::try_parse_from([
-            "logilightshow",
+            "logig560",
             "calibrate-pacing",
             "--delay-ms",
             "6",
@@ -342,7 +342,7 @@ mod tests {
 
         assert!(
             Cli::try_parse_from([
-                "logilightshow",
+                "logig560",
                 "calibrate-pacing",
                 "--delay-ms",
                 "0",
@@ -353,7 +353,7 @@ mod tests {
         );
         assert!(
             Cli::try_parse_from([
-                "logilightshow",
+                "logig560",
                 "calibrate-pacing",
                 "--delay-ms",
                 "6",

@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use logilightshow::{
+use logig560::{
     FrameSource, LightSink, Rgb8, RgbFrame, SamplerConfig, ZoneColors, ZoneLayout, latest_channel,
     run_engine,
 };

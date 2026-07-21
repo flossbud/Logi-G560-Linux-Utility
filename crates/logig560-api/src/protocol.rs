@@ -1,5 +1,5 @@
 //! Wire types for the newline-delimited JSON protocol spoken between the
-//! LogiLightShow lighting service and its Tauri GUI client.
+//! G560 Linux Utility lighting service and its Tauri GUI client.
 
 use serde::{Deserialize, Serialize};
 

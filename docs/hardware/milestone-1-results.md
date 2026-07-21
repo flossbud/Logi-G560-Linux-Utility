@@ -86,7 +86,7 @@ The planned 30-minute fullscreen stimulus was rejected because it would make the
 Command:
 
 ```bash
-./target/release/logilightshow run
+./target/release/logig560 run
 ```
 
 - Method: normal background use of the selected monitor; no behavior change or dedicated stimulus required

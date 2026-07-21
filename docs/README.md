@@ -1,4 +1,4 @@
-# LogiLightShow documentation map
+# G560 Linux Utility documentation map
 
 Use this page to choose the shortest path to the information you need.
 

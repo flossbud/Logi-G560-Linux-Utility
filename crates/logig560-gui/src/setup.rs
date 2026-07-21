@@ -13,12 +13,11 @@ use std::{
 use anyhow::{Context, Result, anyhow};
 use serde::Serialize;
 
-const UDEV_RULE_NAME: &str = "70-logilightshow-g560.rules";
-const UDEV_RULE_CONTENT: &str = include_str!("../../../contrib/70-logilightshow-g560.rules");
-const UDEV_RULE_INSTALL_PATH: &str = "/etc/udev/rules.d/70-logilightshow-g560.rules";
-const SERVICE_UNIT_NAME: &str = "logilightshow-desktop.service";
-const SERVICE_UNIT_TEMPLATE: &str =
-    include_str!("../../../systemd/logilightshow-desktop.service.in");
+const UDEV_RULE_NAME: &str = "70-g560.rules";
+const UDEV_RULE_CONTENT: &str = include_str!("../../../contrib/70-g560.rules");
+const UDEV_RULE_INSTALL_PATH: &str = "/etc/udev/rules.d/70-g560.rules";
+const SERVICE_UNIT_NAME: &str = "logig560-desktop.service";
+const SERVICE_UNIT_TEMPLATE: &str = include_str!("../../../systemd/logig560-desktop.service.in");
 
 #[derive(Debug, Serialize)]
 pub struct UdevStatus {
@@ -101,7 +100,7 @@ fn find_g560_device_status() -> (bool, bool) {
 }
 
 pub fn install_udev_rule() -> ActionOutcome {
-    let temp_dir = env::temp_dir().join("logilightshow-udev");
+    let temp_dir = env::temp_dir().join("logig560-udev");
     if let Err(err) = fs::create_dir_all(&temp_dir) {
         return ActionOutcome::err(anyhow!("create temp dir: {err}"));
     }
@@ -207,7 +206,7 @@ pub fn install_service_unit() -> ActionOutcome {
         return ActionOutcome::err(anyhow!("create {}: {err}", parent.display()));
     }
     let contents =
-        SERVICE_UNIT_TEMPLATE.replace("@LOGILIGHTSHOW_BINARY@", binary.to_string_lossy().as_ref());
+        SERVICE_UNIT_TEMPLATE.replace("@LOGIG560_BINARY@", binary.to_string_lossy().as_ref());
     if let Err(err) = write_private(&unit_path, contents.as_bytes()) {
         return ActionOutcome::err(err);
     }
@@ -248,7 +247,7 @@ fn service_binary_path() -> Result<PathBuf> {
     let dir = this
         .parent()
         .ok_or_else(|| anyhow!("current exe has no parent directory"))?;
-    Ok(dir.join("logilightshow"))
+    Ok(dir.join("logig560"))
 }
 
 fn write_private(path: &std::path::Path, content: &[u8]) -> Result<()> {
@@ -295,9 +294,9 @@ pub struct VersionInfo {
 pub fn version_info() -> VersionInfo {
     VersionInfo {
         gui_version: env!("CARGO_PKG_VERSION").to_string(),
-        api_version: logilightshow_api::API_VERSION,
-        bus_name: logilightshow_api::BUS_NAME.to_string(),
-        interface_name: logilightshow_api::INTERFACE_NAME.to_string(),
+        api_version: logig560_api::API_VERSION,
+        bus_name: logig560_api::BUS_NAME.to_string(),
+        interface_name: logig560_api::INTERFACE_NAME.to_string(),
         build_target: format!("{}-{}", env::consts::ARCH, env::consts::OS),
         distribution: read_os_release_field("PRETTY_NAME"),
         session_type: env::var("XDG_SESSION_TYPE").ok(),

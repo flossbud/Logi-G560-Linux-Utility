@@ -26,18 +26,18 @@ impl Zone {
     ];
 }
 
-impl From<logilightshow_api::ZoneId> for Zone {
-    fn from(zone: logilightshow_api::ZoneId) -> Self {
+impl From<logig560_api::ZoneId> for Zone {
+    fn from(zone: logig560_api::ZoneId) -> Self {
         match zone {
-            logilightshow_api::ZoneId::LeftRear => Self::LeftRear,
-            logilightshow_api::ZoneId::LeftFront => Self::LeftFront,
-            logilightshow_api::ZoneId::RightFront => Self::RightFront,
-            logilightshow_api::ZoneId::RightRear => Self::RightRear,
+            logig560_api::ZoneId::LeftRear => Self::LeftRear,
+            logig560_api::ZoneId::LeftFront => Self::LeftFront,
+            logig560_api::ZoneId::RightFront => Self::RightFront,
+            logig560_api::ZoneId::RightRear => Self::RightRear,
         }
     }
 }
 
-impl From<Zone> for logilightshow_api::ZoneId {
+impl From<Zone> for logig560_api::ZoneId {
     fn from(zone: Zone) -> Self {
         match zone {
             Zone::LeftRear => Self::LeftRear,
@@ -48,8 +48,8 @@ impl From<Zone> for logilightshow_api::ZoneId {
     }
 }
 
-impl From<logilightshow_api::RgbColor> for Rgb8 {
-    fn from(color: logilightshow_api::RgbColor) -> Self {
+impl From<logig560_api::RgbColor> for Rgb8 {
+    fn from(color: logig560_api::RgbColor) -> Self {
         Self {
             r: color.red,
             g: color.green,
@@ -58,7 +58,7 @@ impl From<logilightshow_api::RgbColor> for Rgb8 {
     }
 }
 
-impl From<Rgb8> for logilightshow_api::RgbColor {
+impl From<Rgb8> for logig560_api::RgbColor {
     fn from(color: Rgb8) -> Self {
         Self {
             red: color.r,
@@ -81,7 +81,7 @@ impl ZoneColors {
 
 #[cfg(test)]
 mod tests {
-    use logilightshow_api::{RgbColor, ZoneId};
+    use logig560_api::{RgbColor, ZoneId};
 
     use super::{Rgb8, Zone};
 

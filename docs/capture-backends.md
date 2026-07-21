@@ -1,6 +1,6 @@
 # Capture backends
 
-LogiLightShow has two capture backends because Bazzite Desktop Mode and Gaming Mode expose fundamentally different session facilities.
+G560 Linux Utility has two capture backends because ordinary Wayland desktops and Bazzite Gaming Mode expose fundamentally different session facilities.
 
 ## Shared output contract
 
@@ -31,12 +31,12 @@ It rejects zero or multiple returned streams. Any failure after session creation
 The restore token is opaque. `src/main.rs` stores it at:
 
 ```text
-~/.config/logilightshow/capture.toml
+~/.config/logig560/capture.toml
 ```
 
 The write is create-new temporary file → `0600` → write → fsync → atomic rename → parent-directory fsync. Stale temporary files are not reused.
 
-### Default Bazzite pipeline
+### Default Desktop pipeline
 
 ```text
 pipewiresrc
@@ -48,7 +48,7 @@ pipewiresrc
   → appsink(max-buffers=1, drop=true, sync=false)
 ```
 
-The 50 ms wall-clock pacer limits useful work to about 20 FPS. The leaky queue and appsink ensure old frames do not accumulate.
+The 50 ms wall-clock pacer limits useful work to about 20 FPS. The leaky queue and appsink ensure old frames do not accumulate. This same system-memory path is validated through the GNOME and KDE ScreenCast portal implementations; desktop-specific chooser behavior remains owned by the portal.
 
 An upstream caps probe recalculates the proportional output height on orientation/resolution changes. While caps are changing, `expected_dimensions` is zero and samples are gated. Only a sample matching the most recently installed dimensions can pass. This prevents a stale-resolution frame from reopening the gate during asynchronous caps updates.
 
@@ -69,7 +69,7 @@ The hold does not apply before the first frame or during caps renegotiation. Bus
 Set this only for compatibility testing:
 
 ```bash
-LOGILIGHTSHOW_ENABLE_DMABUF=1 ./target/release/logilightshow run
+LOGIG560_ENABLE_DMABUF=1 ./target/release/logig560 run
 ```
 
 The optional path constrains DMA-BUF formats, rate-limits before conversion, uploads to GL memory, converts to RGBA, downloads to system memory, and then scales to RGB. It was needed on the original Fedora fullscreen path. On the accepted Bazzite machine, GL download negotiated successfully but returned black pixels; therefore system memory is the default.
@@ -112,11 +112,11 @@ Late callbacks advance to the next long-term deadline instead of shifting the sc
 
 | Context | Command | Backend |
 |---|---|---|
-| GNOME/KDE Desktop | `logilightshow run` | portal + GStreamer |
-| Desktop capture diagnostic | `logilightshow capture-test` | new portal selection + GStreamer |
-| Saved Desktop diagnostic | `logilightshow capture-test --saved-permission` | saved portal selection + GStreamer |
-| Bazzite Gaming Mode | `logilightshow run-gaming` | direct Gamescope PipeWire |
-| Gaming capture diagnostic | `logilightshow capture-test --gamescope` | direct Gamescope PipeWire |
+| GNOME/KDE Desktop | `logig560 run` | portal + GStreamer |
+| Desktop capture diagnostic | `logig560 capture-test` | new portal selection + GStreamer |
+| Saved Desktop diagnostic | `logig560 capture-test --saved-permission` | saved portal selection + GStreamer |
+| Bazzite Gaming Mode | `logig560 run-gaming` | direct Gamescope PipeWire |
+| Gaming capture diagnostic | `logig560 capture-test --gamescope` | direct Gamescope PipeWire |
 
 `--gamescope` and `--saved-permission` conflict by design.
 

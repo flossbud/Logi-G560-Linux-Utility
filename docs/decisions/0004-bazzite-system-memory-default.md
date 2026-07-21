@@ -9,7 +9,7 @@ The Fedora fullscreen workaround used a DMA-BUF → GL upload/convert/download b
 
 ## Decision
 
-Use ordinary system-memory PipeWire buffers and GStreamer conversion/scaling by default on Desktop. Retain the DMA-BUF/GL bridge behind `LOGILIGHTSHOW_ENABLE_DMABUF=1` for explicit compatibility testing.
+Use ordinary system-memory PipeWire buffers and GStreamer conversion/scaling by default on Desktop. Retain the DMA-BUF/GL bridge behind `LOGIG560_ENABLE_DMABUF=1` for explicit compatibility testing.
 
 Gaming Mode separately advertises BGRx without a DRM modifier to obtain CPU-mapped MemFd buffers.
 

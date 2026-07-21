@@ -2,7 +2,7 @@
 
 ## Runtime data flow
 
-LogiLightShow processes display pixels locally:
+G560 Linux Utility processes display pixels locally:
 
 1. The desktop portal or Gamescope PipeWire node supplies a frame.
 2. Capture scales it to a small CPU-readable RGB frame.
@@ -17,7 +17,7 @@ The runtime has no application-level network client, telemetry, or remote API.
 The only application-created persistent runtime state is:
 
 ```text
-~/.config/logilightshow/capture.toml
+~/.config/logig560/capture.toml
 ```
 
 It contains a format version and an opaque desktop-portal restore token. It is created with mode `0600`, written through a private create-new temporary file, fsynced, and atomically renamed.
@@ -99,7 +99,7 @@ The Desktop healthy-silence hold repeats only an in-memory, dimension-validated 
 
 Never include these in an archive or issue:
 
-- `~/.config/logilightshow/capture.toml` contents;
+- `~/.config/logig560/capture.toml` contents;
 - full environment dumps that may contain tokens;
 - screenshots or frame buffers without explicit consent;
 - unrelated user journals or home-directory data.

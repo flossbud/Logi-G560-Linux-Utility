@@ -26,7 +26,7 @@ pub fn default_socket_path() -> Result<PathBuf> {
     let runtime_dir = std::env::var_os("XDG_RUNTIME_DIR")
         .map(PathBuf::from)
         .context("XDG_RUNTIME_DIR is not set; user session runtime directory required")?;
-    Ok(runtime_dir.join("logilightshow.sock"))
+    Ok(runtime_dir.join("logig560.sock"))
 }
 
 pub fn bind_listener(path: &Path) -> Result<UnixListener> {

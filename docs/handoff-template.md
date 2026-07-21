@@ -3,7 +3,7 @@
 Copy this file to a dated machine-specific handoff and replace every placeholder. Do not include secrets or captured images.
 
 ```markdown
-# LogiLightShow handoff — <machine/environment>
+# G560 Linux Utility handoff — <machine/environment>
 
 Last updated: <YYYY-MM-DD HH:MM TZ>
 Owner/user confirmation: <what the user actually confirmed>

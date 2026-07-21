@@ -1,4 +1,4 @@
-// LogiLightShow GUI — full behaviour for Lighting, Setup & Service,
+// G560 Linux Utility GUI — full behaviour for Lighting, Setup & Service,
 // Diagnostics, and About pages. The service is the source of truth;
 // every user action dispatches a typed Tauri command and the UI paints
 // from the returned or broadcast ServiceSnapshot.
@@ -717,7 +717,7 @@ function bindDiagnostics() {
     const snap = state.snapshot;
     if (!snap) return;
     const lines = [
-      `LogiLightShow diagnostic report`,
+      `G560 Linux Utility diagnostic report`,
       `revision=${snap.revision} mode=${snap.mode} lights_enabled=${snap.lights_enabled}`,
       `backend=${backendLabel(snap.capture_backend)}`,
       `service_health=${snap.service_health} writer_health=${snap.writer_health} capture_health=${snap.capture_health} device_health=${snap.device_health}`,
@@ -768,7 +768,7 @@ function bindAbout() {
     const v = state.version;
     if (!v) return;
     const text = [
-      `LogiLightShow GUI ${v.gui_version} (API ${v.api_version})`,
+      `G560 Linux Utility GUI ${v.gui_version} (API ${v.api_version})`,
       `Bus: ${v.bus_name}`,
       `Interface: ${v.interface_name}`,
       `Build target: ${v.build_target}`,

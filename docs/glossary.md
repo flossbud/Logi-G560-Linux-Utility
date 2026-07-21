@@ -24,7 +24,7 @@
 
 **Portal grant:** The one-monitor ScreenCast session, selected stream, PipeWire remote file descriptor, and optional restore token returned by the XDG portal.
 
-**Restore token:** An opaque portal authorization token saved to `~/.config/logilightshow/capture.toml`. It allows later Desktop runs to request the same selection without storing monitor pixels or metadata.
+**Restore token:** An opaque portal authorization token saved to `~/.config/logig560/capture.toml`. It allows later Desktop runs to request the same selection without storing monitor pixels or metadata.
 
 **Safety blackout:** An out-of-band, priority command that immediately sends black to all zones and invalidates stale normal work. It is used for startup, capture stall/loss, cancellation, shutdown, and recovery.
 

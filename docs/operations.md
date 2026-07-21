@@ -5,10 +5,10 @@
 Before starting a live instance:
 
 ```bash
-pgrep -af logilightshow || true
+pgrep -af logig560 || true
 lsusb -d 046d:0a78
-systemctl --user is-active logilightshow-desktop-live.service || true
-systemctl --user is-active logilightshow-gaming.service || true
+systemctl --user is-active logig560-desktop-live.service || true
+systemctl --user is-active logig560-gaming.service || true
 ```
 
 Only one process should own the G560 lighting interface.
@@ -18,7 +18,7 @@ Only one process should own the G560 lighting interface.
 ### Foreground
 
 ```bash
-./target/release/logilightshow run
+./target/release/logig560 run
 ```
 
 Use Ctrl-C for clean stop and final blackout.
@@ -29,12 +29,12 @@ The prototype does not ship a persistent Desktop service. For a background test 
 
 ```bash
 systemd-run --user \
-  --unit=logilightshow-desktop-live \
+  --unit=logig560-desktop-live \
   --collect \
   --property=PartOf=graphical-session.target \
   --property=After=graphical-session.target \
-  --working-directory=/home/jaret/Documents/LogiLightShow \
-  /home/jaret/Documents/LogiLightShow/target/release/logilightshow run
+  --working-directory=/home/jaret/Documents/G560 Linux Utility \
+  /home/jaret/Documents/G560 Linux Utility/target/release/logig560 run
 ```
 
 Adjust both paths if the repository moves.
@@ -42,14 +42,14 @@ Adjust both paths if the repository moves.
 Status and logs:
 
 ```bash
-systemctl --user status logilightshow-desktop-live.service --no-pager
-journalctl --user -u logilightshow-desktop-live.service -f
+systemctl --user status logig560-desktop-live.service --no-pager
+journalctl --user -u logig560-desktop-live.service -f
 ```
 
 Clean stop:
 
 ```bash
-systemctl --user stop logilightshow-desktop-live.service
+systemctl --user stop logig560-desktop-live.service
 ```
 
 Because the unit uses `--collect`, it may disappear after stopping. Wait for that before reusing the same transient name.
@@ -67,9 +67,9 @@ The script verifies the checked-in unit and enables it. It does not start the se
 Expected Desktop state:
 
 ```bash
-systemctl --user is-enabled logilightshow-gaming.service
+systemctl --user is-enabled logig560-gaming.service
 # enabled
-systemctl --user is-active logilightshow-gaming.service
+systemctl --user is-active logig560-gaming.service
 # inactive
 ```
 
@@ -78,7 +78,7 @@ In Gaming Mode it starts with `gamescope-session-plus@steam.service` and stops w
 Logs after returning to Desktop:
 
 ```bash
-journalctl --user -u logilightshow-gaming.service -b --no-pager
+journalctl --user -u logig560-gaming.service -b --no-pager
 ```
 
 Disable and stop:
@@ -93,7 +93,7 @@ The intended lifecycle is:
 
 ```mermaid
 sequenceDiagram
-    participant D as GNOME Desktop
+    participant D as GNOME/KDE Desktop
     participant DL as Desktop instance
     participant G as Gamescope session
     participant GL as Gaming service
@@ -120,8 +120,8 @@ Linux can keep the old executable inode running after `cargo build --release` re
 5. Verify its new invocation logs.
 
 ```bash
-systemctl --user stop logilightshow-desktop-live.service
-pgrep -af logilightshow || true
+systemctl --user stop logig560-desktop-live.service
+pgrep -af logig560 || true
 ```
 
 Do not kill the process merely to load a new binary; clean stop is part of safety behavior.
@@ -156,7 +156,7 @@ Do not diagnose from FPS alone. Use changes in `stalls`, error counters, system 
 Record the current invocation ID:
 
 ```bash
-systemctl --user show logilightshow-desktop-live.service \
+systemctl --user show logig560-desktop-live.service \
   -p InvocationID -p MainPID -p ActiveState -p SubState
 ```
 
@@ -182,10 +182,10 @@ A clean foreground/service stop prints totals and attempts final black. Capture 
 ## Routine health check
 
 ```bash
-systemctl --user is-active logilightshow-desktop-live.service || true
-systemctl --user is-enabled logilightshow-gaming.service
-systemctl --user is-active logilightshow-gaming.service || true
-journalctl --user -u logilightshow-desktop-live.service -n 10 --no-pager
+systemctl --user is-active logig560-desktop-live.service || true
+systemctl --user is-enabled logig560-gaming.service
+systemctl --user is-active logig560-gaming.service || true
+journalctl --user -u logig560-desktop-live.service -n 10 --no-pager
 lsusb -d 046d:0a78
 ```
 

@@ -3,8 +3,8 @@ set -euo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 repo_root="$(cd -- "${script_dir}/.." && pwd -P)"
-unit="${repo_root}/systemd/logilightshow-gaming.service"
-binary="${repo_root}/target/release/logilightshow"
+unit="${repo_root}/systemd/logig560-gaming.service"
+binary="${repo_root}/target/release/logig560"
 
 if [[ ! -x "${binary}" ]]; then
     echo "Release binary not found at ${binary}; run cargo build --release first." >&2

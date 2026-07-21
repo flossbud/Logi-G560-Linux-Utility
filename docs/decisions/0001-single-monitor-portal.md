@@ -5,7 +5,7 @@
 
 ## Context
 
-Wayland clients cannot assume unrestricted screen access. LogiLightShow also needs an unambiguous mapping between one display and four physical speaker zones. Capturing an entire multi-monitor desktop would distort geometry and violate the user's selection expectation.
+Wayland clients cannot assume unrestricted screen access. G560 Linux Utility also needs an unambiguous mapping between one display and four physical speaker zones. Capturing an entire multi-monitor desktop would distort geometry and violate the user's selection expectation.
 
 ## Decision
 
@@ -13,7 +13,7 @@ Desktop Mode requests `SourceType::Monitor`, `multiple=false`, and `CursorMode::
 
 ## Consequences
 
-- The system chooser is the authority; LogiLightShow does not enumerate and silently pick a monitor.
+- The system chooser is the authority; G560 Linux Utility does not enumerate and silently pick a monitor.
 - Zero or multiple streams fail closed.
 - First run may require user interaction.
 - A saved opaque token can restore the selection without storing pixels.

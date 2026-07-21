@@ -2,10 +2,10 @@
 
 ## Persisted configuration
 
-LogiLightShow currently persists only Desktop portal authorization:
+G560 Linux Utility currently persists only Desktop portal authorization:
 
 ```text
-~/.config/logilightshow/capture.toml
+~/.config/logig560/capture.toml
 ```
 
 Schema:
@@ -23,7 +23,7 @@ There is no user configuration file for colors, brightness, geometry, transition
 
 | Variable | Effect | Default |
 |---|---|---|
-| `LOGILIGHTSHOW_ENABLE_DMABUF` | Any presence enables the optional Desktop DMA-BUF/GL bridge | unset; system-memory Desktop path |
+| `LOGIG560_ENABLE_DMABUF` | Any presence enables the optional Desktop DMA-BUF/GL bridge | unset; system-memory Desktop path |
 | `RUST_LOG` | No current effect; the binary does not initialize a tracing subscriber | unset |
 
 The DMABUF variable is a compatibility diagnostic, not a recommended Bazzite setting.
@@ -55,10 +55,10 @@ Treat this table as an index, not a second source of truth. Update it when sourc
 
 ## Service configuration
 
-`systemd/logilightshow-gaming.service` contains a machine-layout assumption:
+`systemd/logig560-gaming.service` contains a machine-layout assumption:
 
 ```ini
-ExecStart=%h/Documents/LogiLightShow/target/release/logilightshow run-gaming
+ExecStart=%h/Documents/G560 Linux Utility/target/release/logig560 run-gaming
 ```
 
 The install script symlinks the repository unit into the user systemd configuration. Moving the repository breaks both the unit symlink and `ExecStart`. Reinstall or make packaging relocatable as one coordinated change.

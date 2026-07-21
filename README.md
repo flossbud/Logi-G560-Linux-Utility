@@ -1,8 +1,8 @@
-# LogiLightShow
+# G560 Linux Utility
 
-LogiLightShow is an experimental low-latency screen matcher for the Logitech G560 on Linux. The CLI captures one display, samples four polygons shaped for the speakers' front/rear light layout, and drives the four verified lighting zones. Desktop Mode uses the system ScreenCast portal; Bazzite Gaming Mode captures Gamescope's native PipeWire output. The prototype is accepted on Fedora/Bazzite GNOME and Gamescope, and its unchanged Desktop backend has been operationally validated on Arch Linux KDE Plasma 6 Wayland.
+G560 Linux Utility is an experimental low-latency screen matcher for the Logitech G560 on Linux. The CLI captures one display, samples four polygons shaped for the speakers' front/rear light layout, and drives the four verified lighting zones. Desktop Mode uses the system ScreenCast portal; Bazzite Gaming Mode captures Gamescope's native PipeWire output. The prototype is accepted on Fedora/Bazzite GNOME and Gamescope, and its unchanged Desktop backend has been operationally validated on Arch Linux KDE Plasma 6 Wayland.
 
-The `run` and `run-gaming` commands now act as a persistent lighting service that also exposes a newline-delimited JSON API on the user-session Unix socket `$XDG_RUNTIME_DIR/logilightshow.sock`. A Tauri 2 GUI (`crates/logilightshow-gui/`) drives the service over that socket to control manual color, brightness, master power, Content-Aware mode, capture backend, setup, and diagnostics. Distributable packaging remains future work.
+The `run` and `run-gaming` commands now act as a persistent lighting service that also exposes a newline-delimited JSON API on the user-session Unix socket `$XDG_RUNTIME_DIR/logig560.sock`. A Tauri 2 GUI (`crates/logig560-gui/`) drives the service over that socket to control manual color, brightness, master power, Content-Aware mode, capture backend, setup, and diagnostics. Distributable packaging remains future work.
 
 ## Documentation
 
@@ -49,13 +49,13 @@ Bazzite's immutable host should not be modified just to assemble a development d
 
 ## One-time USB permission
 
-Install the narrowly scoped udev rule. The script uses Polkit only to install the `046d:0a78` rule and reload udev; LogiLightShow itself stays unprivileged.
+Install the narrowly scoped udev rule. The script uses Polkit only to install the `046d:0a78` rule and reload udev; G560 Linux Utility itself stays unprivileged.
 
 ```bash
 ./scripts/install-udev-rule.sh
 ```
 
-Unplug and reconnect the G560 if the current USB node does not receive an access ACL after installation. Never run LogiLightShow with `sudo`.
+Unplug and reconnect the G560 if the current USB node does not receive an access ACL after installation. Never run G560 Linux Utility with `sudo`.
 
 ## Commands
 
@@ -86,7 +86,7 @@ Start screen matching:
 In Bazzite Gaming Mode, use the direct Gamescope backend:
 
 ```bash
-./target/release/logilightshow run-gaming
+./target/release/logig560 run-gaming
 ```
 
 Normally it is launched by the checked-in user service:
@@ -97,7 +97,7 @@ Normally it is launched by the checked-in user service:
 
 The Gaming service is expected to be enabled but inactive in Desktop Mode and to start only with `gamescope-session-plus@steam.service`.
 
-The first run opens the monitor chooser. A returned restore token is atomically stored at `~/.config/logilightshow/capture.toml` with mode `0600`; later runs ask the portal to restore that same authorization. Ctrl-C, service SIGTERM, and normal capture termination enter the clean-stop path and request a final all-zone blackout.
+The first run opens the monitor chooser. A returned restore token is atomically stored at `~/.config/logig560/capture.toml` with mode `0600`; later runs ask the portal to restore that same authorization. Ctrl-C, service SIGTERM, and normal capture termination enter the clean-stop path and request a final all-zone blackout.
 
 While running, the CLI prints five-second captured-FPS and rendered-update rates, cumulative dropped-frame and capture-stall counts, cumulative capture-to-write p50/p95/p99 latency, and USB/capture recovery counters. It never logs sampled colors. Capture is paced to approximately 20 frames per second and every inter-stage handoff keeps only the newest value. In the final Fedora fullscreen hardware run, the calibrated USB cadence delivered 18.22 complete lighting updates/s from an 18.35 FPS capture stream without queuing stale states.
 
@@ -144,6 +144,6 @@ getfacl /dev/bus/usb/BUS/DEVICE
 
 Resolve `BUS` and `DEVICE` from `lsusb`; do not copy a stale device number. If static control is needed to isolate capture from USB behavior, rerun the `set-zones` command above. If colors address the wrong physical location, consult [the verified zone map](docs/hardware/g560-zone-map.md).
 
-Desktop capture defaults to GStreamer system memory on the accepted Bazzite machine. The Fedora-tested DMA-BUF/OpenGL bridge remains available only through `LOGILIGHTSHOW_ENABLE_DMABUF=1`; it returned black downloaded pixels on this Bazzite stack and must not be made the default without new live evidence. Gaming Mode uses a separate direct PipeWire backend because Gamescope does not provide the normal desktop portal.
+Desktop capture defaults to GStreamer system memory on the accepted Bazzite machine. The Fedora-tested DMA-BUF/OpenGL bridge remains available only through `LOGIG560_ENABLE_DMABUF=1`; it returned black downloaded pixels on this Bazzite stack and must not be made the default without new live evidence. Gaming Mode uses a separate direct PipeWire backend because Gamescope does not provide the normal desktop portal.
 
 Fedora milestone-one acceptance measurements are tracked in [the hardware results](docs/hardware/milestone-1-results.md). Current Bazzite acceptance and unresolved prototype boundaries are tracked in [the Bazzite handoff](HANDOFF_BAZZITE.md) and [known limitations](docs/known-limitations.md).

@@ -12,15 +12,15 @@ cargo build --release
 bash -n scripts/install-udev-rule.sh \
   scripts/install-gaming-service.sh \
   scripts/uninstall-gaming-service.sh
-systemd-analyze --user verify systemd/logilightshow-gaming.service
+systemd-analyze --user verify systemd/logig560-gaming.service
 git diff --check
 ```
 
 On the accepted Bazzite machine:
 
 ```bash
-distrobox enter logilightshow -- bash -lc \
-  'cd /home/jaret/Documents/LogiLightShow && \
+distrobox enter logig560 -- bash -lc \
+  'cd /home/jaret/Documents/G560 Linux Utility && \
    cargo clippy --all-targets -- -D warnings && \
    cargo test --all-targets && \
    cargo build --release'
@@ -75,19 +75,26 @@ cargo test --test engine_fake -- --nocapture
 Desktop:
 
 ```bash
-./target/release/logilightshow capture-test --frames 30
+./target/release/logig560 capture-test --frames 30
+```
+
+On Arch/KDE, first verify that both layers needed by the same Desktop command are present:
+
+```bash
+systemctl --user is-active plasma-xdg-desktop-portal-kde.service
+gst-inspect-1.0 pipewiresrc
 ```
 
 Saved selection:
 
 ```bash
-./target/release/logilightshow capture-test --saved-permission --frames 30
+./target/release/logig560 capture-test --saved-permission --frames 30
 ```
 
 Gaming Mode:
 
 ```bash
-./target/release/logilightshow capture-test --gamescope --frames 30
+./target/release/logig560 capture-test --gamescope --frames 30
 ```
 
 These save no images. They do print one sampled zone-color set, so do not paste output into public logs without considering that disclosure.

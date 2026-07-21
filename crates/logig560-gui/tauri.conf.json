@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "LogiLightShow",
+  "productName": "G560 Linux Utility",
   "version": "0.1.0",
-  "identifier": "com.logilightshow.gui",
+  "identifier": "com.logig560.gui",
   "build": {
     "frontendDist": "./ui"
   },
@@ -10,7 +10,7 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "LogiLightShow",
+        "title": "G560 Linux Utility",
         "width": 1080,
         "height": 720,
         "minWidth": 920,

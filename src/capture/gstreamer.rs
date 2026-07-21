@@ -211,7 +211,7 @@ fn build_pipeline(pipeline: &gst::Pipeline, grant: &PortalGrant) -> Result<RgbTa
     // downloads completely black frames. System-memory PipeWire buffers are
     // reliable there and also keep GNOME compositing while capture is active.
     // Retain the Fedora-tested bridge as an explicit compatibility option.
-    let require_dmabuf = std::env::var_os("LOGILIGHTSHOW_ENABLE_DMABUF").is_some();
+    let require_dmabuf = std::env::var_os("LOGIG560_ENABLE_DMABUF").is_some();
     let appsink = attach_rgb_tail_with_direct_scanout(pipeline, &pipewire, require_dmabuf)?;
     pipeline
         .set_state(gst::State::Playing)

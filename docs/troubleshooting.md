@@ -5,11 +5,11 @@ Start with evidence. Do not tune the sampler, transition, capture timeout, or US
 ## Fast triage
 
 ```bash
-pgrep -af logilightshow || true
+pgrep -af logig560 || true
 lsusb -d 046d:0a78
-systemctl --user status logilightshow-desktop-live.service --no-pager || true
-systemctl --user status logilightshow-gaming.service --no-pager || true
-journalctl --user -u logilightshow-desktop-live.service -n 30 --no-pager || true
+systemctl --user status logig560-desktop-live.service --no-pager || true
+systemctl --user status logig560-gaming.service --no-pager || true
+journalctl --user -u logig560-desktop-live.service -n 30 --no-pager || true
 ```
 
 Then classify:
@@ -29,7 +29,7 @@ Then classify:
 If `stalls` increments, this is an engine safety blackout, not a color target. Correlate the exact second:
 
 ```bash
-journalctl --user -u logilightshow-desktop-live.service -o short-precise --no-pager
+journalctl --user -u logig560-desktop-live.service -o short-precise --no-pager
 journalctl --since 'START' --until 'END' -o short-precise --no-pager
 ```
 
@@ -62,17 +62,33 @@ Sampler regressions belong in `src/sampler.rs` with adjacent-value/ramp tests. F
 Run:
 
 ```bash
-./target/release/logilightshow capture-test --saved-permission --frames 30
+./target/release/logig560 capture-test --saved-permission --frames 30
 ```
 
 If peak component and non-black frame count are zero for visibly bright content:
 
-1. Ensure `LOGILIGHTSHOW_ENABLE_DMABUF` is not exported.
+1. Ensure `LOGIG560_ENABLE_DMABUF` is not exported.
 2. Verify `pipewiresrc`, `videoconvert`, and `videoscale` exist.
 3. Re-run without saved permission and choose the intended monitor.
 4. Inspect GStreamer errors and negotiated caps.
 
 On the accepted Bazzite machine, the optional DMA-BUF/GL path negotiated but downloaded black pixels. The system-memory path is intentional.
+
+## Desktop capture cannot construct `pipewiresrc`
+
+If the portal chooser works or the portal services are healthy but startup reports that `pipewiresrc` cannot be created, verify the element directly:
+
+```bash
+gst-inspect-1.0 pipewiresrc
+```
+
+On Arch Linux, install the separately packaged runtime plugin:
+
+```bash
+sudo pacman -S --needed gst-plugin-pipewire
+```
+
+This is independent of `xdg-desktop-portal-kde` and the PipeWire daemon; all three can be present while the GStreamer source plugin is missing.
 
 ## Capture FPS falls to about 5 on a static scene
 
@@ -90,7 +106,7 @@ do not treat 5 FPS as a failure.
 Inspect the token file without printing its contents:
 
 ```bash
-stat -c '%a %U %G %n' ~/.config/logilightshow/capture.toml
+stat -c '%a %U %G %n' ~/.config/logig560/capture.toml
 ```
 
 Expected mode is `600` and current user ownership.
@@ -98,8 +114,8 @@ Expected mode is `600` and current user ownership.
 To test a fresh chooser without destroying the token, `capture-test` without `--saved-permission` already requests a new selection. If a persistent reset is necessary, move the config to a backup rather than deleting it:
 
 ```bash
-mv ~/.config/logilightshow/capture.toml \
-  ~/.config/logilightshow/capture.toml.backup
+mv ~/.config/logig560/capture.toml \
+  ~/.config/logig560/capture.toml.backup
 ```
 
 Do this only with user intent; it changes saved authorization.
@@ -129,7 +145,7 @@ Reconnect the speakers. Never run the application with `sudo`.
 Check competing instances:
 
 ```bash
-pgrep -af logilightshow
+pgrep -af logig560
 fuser /dev/bus/usb/BUS/DEVICE 2>/dev/null || true
 ```
 
@@ -144,10 +160,10 @@ Any cadence change requires fake pacing tests plus a real audio-playing calibrat
 From Desktop after returning:
 
 ```bash
-systemctl --user is-enabled logilightshow-gaming.service
-systemctl --user cat logilightshow-gaming.service
-journalctl --user -u logilightshow-gaming.service -b --no-pager
-ls -l ~/.config/systemd/user/logilightshow-gaming.service
+systemctl --user is-enabled logig560-gaming.service
+systemctl --user cat logig560-gaming.service
+journalctl --user -u logig560-gaming.service -b --no-pager
+ls -l ~/.config/systemd/user/logig560-gaming.service
 ls -l ~/.config/systemd/user/gamescope-session-plus@steam.service.wants/
 ```
 

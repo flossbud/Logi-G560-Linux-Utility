@@ -2,7 +2,7 @@
 //! JSON payload from the frontend into a typed `ClientCommand` and awaits
 //! the service response.
 
-use logilightshow_api::{
+use logig560_api::{
     LightingMode, ManualZoneUpdate, ServiceSnapshot,
     protocol::{ClientCommand, RequestResult},
 };

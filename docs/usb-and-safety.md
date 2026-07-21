@@ -112,20 +112,20 @@ After three consecutive write failures, the current device is blacked out if pos
 
 ## Permission boundary
 
-Runtime remains unprivileged. `contrib/70-logilightshow-g560.rules` grants the active local user access when the device is added:
+Runtime remains unprivileged. `contrib/70-g560.rules` grants the active local user access when the device is added:
 
 ```udev
 ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="046d", ATTR{idProduct}=="0a78", TAG+="uaccess"
 ```
 
-`scripts/install-udev-rule.sh` uses `pkexec` only to copy that specific rule and reload/trigger udev. Never solve access problems by running LogiLightShow with `sudo`.
+`scripts/install-udev-rule.sh` uses `pkexec` only to copy that specific rule and reload/trigger udev. Never solve access problems by running G560 Linux Utility with `sudo`.
 
 ## Hardware diagnostics
 
 Use static colors to isolate USB from capture:
 
 ```bash
-./target/release/logilightshow set-zones \
+./target/release/logig560 set-zones \
   --left-rear FF0000 \
   --left-front 00FF00 \
   --right-front 0000FF \
@@ -135,19 +135,19 @@ Use static colors to isolate USB from capture:
 Pulse one raw index for mapping:
 
 ```bash
-./target/release/logilightshow verify-zone 0
+./target/release/logig560 verify-zone 0
 ```
 
 Run the five-minute rotating soak:
 
 ```bash
-./target/release/logilightshow verify-soak
+./target/release/logig560 verify-soak
 ```
 
 Re-run pacing calibration only when intentionally validating hardware timing:
 
 ```bash
-./target/release/logilightshow calibrate-pacing --delay-ms 6 --seconds 15
+./target/release/logig560 calibrate-pacing --delay-ms 6 --seconds 15
 ```
 
 Stop every live service first. Keep audio playing. These commands physically change the lights, and calibration produces sustained USB traffic.

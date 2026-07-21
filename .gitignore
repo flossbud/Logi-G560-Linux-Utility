@@ -1,1 +1,7 @@
 /target/
+
+# Bundled or copyrighted material kept locally, not published.
+/*.zip
+/*.jpg
+/*.pdf
+/ui-example/

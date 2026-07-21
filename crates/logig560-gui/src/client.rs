@@ -1,5 +1,5 @@
 //! Thin async client that keeps a persistent connection to the
-//! LogiLightShow lighting service Unix socket. Retries on connect
+//! G560 Linux Utility lighting service Unix socket. Retries on connect
 //! failure, dispatches requests to correlate responses by id, and
 //! fans out `Ready`/`Event` snapshots via a broadcast channel.
 
@@ -14,7 +14,7 @@ use std::{
 };
 
 use anyhow::{Context, Result, anyhow};
-use logilightshow_api::{
+use logig560_api::{
     ServiceSnapshot,
     protocol::{ClientCommand, ClientRequest, RequestResult, ServerMessage},
 };
@@ -33,7 +33,7 @@ pub fn default_socket_path() -> Result<PathBuf> {
     let runtime = std::env::var_os("XDG_RUNTIME_DIR")
         .map(PathBuf::from)
         .context("XDG_RUNTIME_DIR is not set; user session runtime directory required")?;
-    Ok(runtime.join("logilightshow.sock"))
+    Ok(runtime.join("logig560.sock"))
 }
 
 #[derive(Debug, Clone, serde::Serialize)]

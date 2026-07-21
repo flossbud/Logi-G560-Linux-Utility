@@ -47,12 +47,30 @@ libusb1-devel
 
 The accepted Fedora 43 container used GStreamer 1.26.11, PipeWire development 1.4.11, and libusb development 1.0.30. The Bazzite host runtime versions can differ slightly; verify dynamic linking and live behavior after upgrades.
 
+Arch Linux package names:
+
+```text
+base-devel
+pkgconf
+rustup
+gstreamer
+gst-plugins-base
+gst-plugins-bad
+gst-plugin-pipewire
+pipewire
+libusb
+xdg-desktop-portal
+xdg-desktop-portal-kde
+```
+
+The Arch KDE validation used Plasma/KWin 6.7.3, xdg-desktop-portal 1.22.1, GStreamer 1.28.5, and PipeWire 1.6.8. `gst-plugin-pipewire` is a separate Arch package and is required even when the portal backend itself is already running.
+
 ## Runtime services/libraries
 
 Desktop requires:
 
 - Wayland compositor;
-- `xdg-desktop-portal` plus a desktop backend such as GNOME;
+- `xdg-desktop-portal` plus a desktop backend such as GNOME or KDE;
 - PipeWire;
 - GStreamer core, PipeWire source, base video conversion/scaling plugins;
 - optional GL plugins only for the opt-in DMA-BUF path.

@@ -6,7 +6,7 @@
 
 use std::time::Duration;
 
-use logilightshow::{
+use logig560::{
     AppConfig, ControllerModel, LightingMode, ManualZoneUpdate, RgbColor, ZoneId,
     service::{
         ClientCommand, ClientRequest, RequestResult, ServerMessage,
@@ -43,7 +43,7 @@ async fn send_request(writer: &mut tokio::net::unix::OwnedWriteHalf, request: &C
 #[tokio::test]
 async fn ready_message_lands_on_connect_and_manual_update_round_trips() {
     let dir = tempdir().unwrap();
-    let socket = dir.path().join("logilightshow.sock");
+    let socket = dir.path().join("logig560.sock");
     let listener = bind_listener(&socket).unwrap();
     let model = ControllerModel::new(AppConfig::default()).unwrap();
     let (snapshot_tx, snapshot_rx) = watch::channel(model.snapshot());
@@ -107,7 +107,7 @@ async fn ready_message_lands_on_connect_and_manual_update_round_trips() {
 
     match read_message(&mut reader).await {
         ServerMessage::Ready { api_version, .. } => {
-            assert_eq!(api_version, logilightshow::API_VERSION);
+            assert_eq!(api_version, logig560::API_VERSION);
         }
         other => panic!("expected Ready as first message, got {other:?}"),
     }
@@ -165,7 +165,7 @@ async fn ready_message_lands_on_connect_and_manual_update_round_trips() {
 #[tokio::test]
 async fn invalid_manual_update_returns_api_error() {
     let dir = tempdir().unwrap();
-    let socket = dir.path().join("logilightshow.sock");
+    let socket = dir.path().join("logig560.sock");
     let listener = bind_listener(&socket).unwrap();
     let mut model = ControllerModel::new(AppConfig {
         mode: LightingMode::ContentAware,
@@ -234,7 +234,7 @@ async fn invalid_manual_update_returns_api_error() {
             result: RequestResult::Err { error },
         } => {
             assert_eq!(id, 7);
-            assert_eq!(error, logilightshow::ApiError::ModeConflict);
+            assert_eq!(error, logig560::ApiError::ModeConflict);
         }
         other => panic!("expected typed error response, got {other:?}"),
     }

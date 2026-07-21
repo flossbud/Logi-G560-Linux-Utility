@@ -2,7 +2,7 @@
 
 ## System purpose
 
-LogiLightShow turns one selected display into four ambient-light targets for Logitech G560 speakers. It minimizes perceptible lag by keeping only the newest work at every stage, while a separate priority path turns all zones black when continuing to show scene colors would be unsafe or misleading.
+G560 Linux Utility turns one selected display into four ambient-light targets for Logitech G560 speakers. It minimizes perceptible lag by keeping only the newest work at every stage, while a separate priority path turns all zones black when continuing to show scene colors would be unsafe or misleading.
 
 ## End-to-end data flow
 

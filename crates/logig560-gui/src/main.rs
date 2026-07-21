@@ -11,7 +11,7 @@ use client::{ServiceClient, default_socket_path};
 
 fn main() {
     let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("logilightshow_gui=info,warn"));
+        .unwrap_or_else(|_| EnvFilter::new("logig560_gui=info,warn"));
     tracing_subscriber::fmt()
         .with_env_filter(filter)
         .with_target(false)
@@ -24,7 +24,7 @@ fn main() {
             std::process::exit(1);
         }
     };
-    info!(socket = %socket_path.display(), "starting LogiLightShow GUI");
+    info!(socket = %socket_path.display(), "starting G560 Linux Utility GUI");
 
     tauri::Builder::default()
         .setup(move |app| {
@@ -97,5 +97,5 @@ fn main() {
             commands::version_info,
         ])
         .run(tauri::generate_context!())
-        .expect("failed to launch LogiLightShow GUI");
+        .expect("failed to launch G560 Linux Utility GUI");
 }

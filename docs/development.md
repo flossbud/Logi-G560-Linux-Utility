@@ -2,7 +2,7 @@
 
 ## Working model
 
-LogiLightShow is a Rust 2024 project with a library plus one CLI binary. Most behavior is expressed behind small traits and tested with in-process fakes.
+G560 Linux Utility is a Rust 2024 project with a library plus one CLI binary. Most behavior is expressed behind small traits and tested with in-process fakes.
 
 Start every task with:
 
@@ -144,7 +144,7 @@ Validate:
 
 ```bash
 bash -n scripts/*.sh
-systemd-analyze --user verify systemd/logilightshow-gaming.service
+systemd-analyze --user verify systemd/logig560-gaming.service
 ```
 
 Then test a real Desktop→Gaming→Desktop cycle. Confirm the Gaming service is enabled/inactive on Desktop, active in Gamescope, and stopped/black after exit.

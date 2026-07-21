@@ -8,7 +8,7 @@ use std::{
 
 use anyhow::{Context, Result, bail};
 use directories::BaseDirs;
-use logilightshow_api::{LightingMode, ManualZone, RgbColor, ZoneId};
+use logig560_api::{LightingMode, ManualZone, RgbColor, ZoneId};
 use serde::{Deserialize, Serialize};
 
 pub const CONFIG_VERSION: u32 = 2;
@@ -305,14 +305,14 @@ fn parent_directory(path: &Path) -> Result<&Path> {
 
 pub fn config_path() -> Result<PathBuf> {
     let base = BaseDirs::new().context("could not determine the user configuration directory")?;
-    Ok(base.config_dir().join("logilightshow/config.toml"))
+    Ok(base.config_dir().join("logig560/config.toml"))
 }
 
 #[cfg(test)]
 mod tests {
     use std::{fs, os::unix::fs::PermissionsExt};
 
-    use logilightshow_api::{LightingMode, ManualZone, RgbColor, ZoneId};
+    use logig560_api::{LightingMode, ManualZone, RgbColor, ZoneId};
 
     use super::*;
 

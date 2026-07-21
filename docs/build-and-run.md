@@ -25,6 +25,29 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 cargo build --release
 ```
 
+## Arch Linux KDE Plasma host
+
+Arch is mutable, so install build and Desktop runtime dependencies on the host:
+
+```bash
+sudo pacman -S --needed \
+  base-devel pkgconf rustup \
+  gstreamer gst-plugins-base gst-plugins-bad gst-plugin-pipewire \
+  pipewire libusb xdg-desktop-portal xdg-desktop-portal-kde
+rustup toolchain install 1.97.1
+cargo build --release
+```
+
+Run the release binary in the unprivileged Plasma Wayland user session. Verify that KDE's portal and GStreamer's PipeWire source are both available:
+
+```bash
+systemctl --user status xdg-desktop-portal.service \
+  plasma-xdg-desktop-portal-kde.service --no-pager
+gst-inspect-1.0 pipewiresrc videoconvert videoscale
+```
+
+On the validated Arch Plasma 6 host, `gst-plugin-pipewire` was the only missing prerequisite. The existing system-memory Desktop pipeline then produced non-black 160x90 frames and drove the live engine without a KDE-specific source branch.
+
 Verify capture elements:
 
 ```bash
@@ -39,19 +62,19 @@ gst-inspect-1.0 glupload glcolorconvert gldownload videorate
 
 ## Bazzite development container
 
-Bazzite is immutable. Do not layer a development toolchain onto the host merely to build this prototype. The tested setup is a Fedora 43 Distrobox named `logilightshow`.
+Bazzite is immutable. Do not layer a development toolchain onto the host merely to build this prototype. The tested setup is a Fedora 43 Distrobox named `logig560`.
 
 Create it once if necessary:
 
 ```bash
-distrobox create --name logilightshow \
+distrobox create --name logig560 \
   --image registry.fedoraproject.org/fedora-toolbox:43
 ```
 
 Install native development dependencies inside it:
 
 ```bash
-distrobox enter logilightshow -- sudo dnf install -y \
+distrobox enter logig560 -- sudo dnf install -y \
   gcc \
   pkgconf-pkg-config \
   gstreamer1-devel \
@@ -66,20 +89,20 @@ The accepted container uses the host user's rustup toolchain mounted into the co
 Build from the host-mounted repository:
 
 ```bash
-distrobox enter logilightshow -- bash -lc \
-  'cd /home/jaret/Documents/LogiLightShow && cargo build --release'
+distrobox enter logig560 -- bash -lc \
+  'cd /home/jaret/Documents/G560 Linux Utility && cargo build --release'
 ```
 
 Run the binary on the host, not with `sudo`, so it sees the real Wayland/PipeWire user session and USB access:
 
 ```bash
-./target/release/logilightshow --help
+./target/release/logig560 --help
 ```
 
 The accepted host provides runtime `libgstreamer-1.0`, `libpipewire-0.3`, and `libusb-1.0`. Check portability after moving the binary:
 
 ```bash
-ldd target/release/logilightshow | rg 'not found|gstreamer|pipewire|usb'
+ldd target/release/logig560 | rg 'not found|gstreamer|pipewire|usb'
 ```
 
 If a host Cargo command fails while compiling `libspa-sys` with “Package libpipewire-0.3 was not found,” build in the container. Do not mistake it for a source regression.
@@ -90,7 +113,7 @@ If a host Cargo command fails while compiling `libspa-sys` with “Package libpi
 ./scripts/install-udev-rule.sh
 ```
 
-This invokes Polkit only for installing/reloading the narrow udev rule. Reconnect the speakers if the existing node does not receive a user ACL.
+This invokes Polkit only for installing/reloading the narrow udev rule. The installer replays an add event for the matching device so an already-connected G560 receives the user ACL; reconnect the speakers if the ACL still does not appear.
 
 Verify:
 
@@ -113,7 +136,7 @@ Never hard-code a device number; it changes after reconnection.
 Desktop portal capture plus live lighting:
 
 ```bash
-./target/release/logilightshow run
+./target/release/logig560 run
 ```
 
 The first run opens the system monitor chooser. Later runs request the saved selection.
@@ -123,7 +146,7 @@ The first run opens the system monitor chooser. Later runs request the saved sel
 Direct Bazzite Gamescope capture plus live lighting:
 
 ```bash
-./target/release/logilightshow run-gaming
+./target/release/logig560 run-gaming
 ```
 
 Run this only in a Gamescope session with a `gamescope` PipeWire node. Normally the user service starts it.
@@ -133,19 +156,19 @@ Run this only in a Gamescope session with a `gamescope` PipeWire node. Normally 
 New Desktop portal selection:
 
 ```bash
-./target/release/logilightshow capture-test --frames 30
+./target/release/logig560 capture-test --frames 30
 ```
 
 Saved Desktop permission:
 
 ```bash
-./target/release/logilightshow capture-test --saved-permission --frames 30
+./target/release/logig560 capture-test --saved-permission --frames 30
 ```
 
 Gamescope:
 
 ```bash
-./target/release/logilightshow capture-test --gamescope --frames 30
+./target/release/logig560 capture-test --gamescope --frames 30
 ```
 
 The diagnostic never saves images, but it does print the last sampled zone colors.
@@ -155,7 +178,7 @@ The diagnostic never saves images, but it does print the last sampled zone color
 Direct four-zone RGB test; each value is exactly six hexadecimal digits:
 
 ```bash
-./target/release/logilightshow set-zones \
+./target/release/logig560 set-zones \
   --left-rear FF0000 \
   --left-front 00FF00 \
   --right-front 0000FF \
@@ -167,7 +190,7 @@ Direct four-zone RGB test; each value is exactly six hexadecimal digits:
 Black → one raw protocol index white for 12 seconds → black:
 
 ```bash
-./target/release/logilightshow verify-zone 2
+./target/release/logig560 verify-zone 2
 ```
 
 Valid raw indexes are 0 through 3. Consult the zone map before interpreting them.
@@ -177,7 +200,7 @@ Valid raw indexes are 0 through 3. Consult the zone map before interpreting them
 Five-minute rotating four-color hardware/audio test:
 
 ```bash
-./target/release/logilightshow verify-soak
+./target/release/logig560 verify-soak
 ```
 
 ### `calibrate-pacing`
@@ -185,7 +208,7 @@ Five-minute rotating four-color hardware/audio test:
 Diagnostic-only sustained report pacing; it never saves the delay:
 
 ```bash
-./target/release/logilightshow calibrate-pacing --delay-ms 6 --seconds 15
+./target/release/logig560 calibrate-pacing --delay-ms 6 --seconds 15
 ```
 
 Stop all live instances first and keep audio playing.
@@ -195,7 +218,7 @@ Stop all live instances first and keep audio playing.
 The system-memory path is the Bazzite default. Test the Fedora-style DMA-BUF/GL bridge with:
 
 ```bash
-LOGILIGHTSHOW_ENABLE_DMABUF=1 ./target/release/logilightshow capture-test --frames 30
+LOGIG560_ENABLE_DMABUF=1 ./target/release/logig560 capture-test --frames 30
 ```
 
 Do not export this globally on the accepted Bazzite machine; it produced black captured pixels there.
@@ -204,9 +227,9 @@ Do not export this globally on the accepted Bazzite machine; it produced black c
 
 | Path | Purpose | Expected permissions |
 |---|---|---:|
-| `~/.config/logilightshow/capture.toml` | portal restore token | `0600` |
-| `~/.config/systemd/user/logilightshow-gaming.service` | symlink to repository unit | symlink |
-| `~/.config/systemd/user/gamescope-session-plus@steam.service.wants/logilightshow-gaming.service` | Gaming enablement symlink | symlink |
-| `/etc/udev/rules.d/70-logilightshow-g560.rules` | host USB access rule | root-owned `0644` |
+| `~/.config/logig560/capture.toml` | portal restore token | `0600` |
+| `~/.config/systemd/user/logig560-gaming.service` | symlink to repository unit | symlink |
+| `~/.config/systemd/user/gamescope-session-plus@steam.service.wants/logig560-gaming.service` | Gaming enablement symlink | symlink |
+| `/etc/udev/rules.d/70-g560.rules` | host USB access rule | root-owned `0644` |
 
 The capture config contains a version and opaque token, not pixels or monitor images.

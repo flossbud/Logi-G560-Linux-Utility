@@ -1,4 +1,4 @@
-# LogiLightShow — Bazzite handoff
+# G560 Linux Utility — Bazzite handoff
 
 For a new agent, begin with [`AGENTS.md`](AGENTS.md), [`docs/project-status.md`](docs/project-status.md), and the [`docs` index](docs/README.md). This file is the machine-specific Bazzite acceptance record.
 
@@ -9,7 +9,7 @@ The Bazzite prototype is accepted on the same physical machine used for the orig
 Final behavior on this machine:
 
 - Desktop Mode uses the saved single-monitor GNOME portal authorization and the system-memory GStreamer path.
-- Gaming Mode uses the enabled `logilightshow-gaming.service` and direct Gamescope PipeWire capture; it is inactive in Desktop Mode by design.
+- Gaming Mode uses the enabled `logig560-gaming.service` and direct Gamescope PipeWire capture; it is inactive in Desktop Mode by design.
 - Brief healthy portal silence holds the last valid frame after 200 ms, preventing false 500 ms stall blackouts. Terminal capture errors and EOS retain the safety path.
 - The low-light sampler uses a soft visibility ramp and deterministic blending.
 - Normal color changes use 90 ms per-zone OKLab transitions. A normally sampled zone going fully black uses a 200 ms fade. Safety blackouts remain immediate.
@@ -17,7 +17,7 @@ Final behavior on this machine:
 
 At handoff, the transient Desktop test service is running and the Gaming Mode service is enabled. Source changes are intentionally left uncommitted for the owner to review and commit.
 
-`LogiLightShow-Bazzite-agent-handoff.zip` is the current portable source-and-documentation snapshot. The older `LogiLightShow-Bazzite-handoff.zip` and `LogiLightShow-Bazzite-prototype-final.zip` files are preserved historical snapshots; do not silently replace them.
+`G560 Linux Utility-Bazzite-agent-handoff.zip` is the current portable source-and-documentation snapshot. The older `G560 Linux Utility-Bazzite-handoff.zip` and `G560 Linux Utility-Bazzite-prototype-final.zip` files are preserved historical snapshots; do not silently replace them.
 
 ## What is here
 
@@ -31,7 +31,7 @@ Hardware facts established during testing:
 - USB worker is FIFO/non-blocking from the capture loop; control writes have a 100 ms timeout and recovery logic.
 - Production defaults are approximately 18–20 FPS capture, 6 ms USB report spacing, 90 ms normal transitions, and 200 ms normal fades to exact black. Do not lower USB spacing without re-running the hardware cadence test.
 
-Desktop Mode defaults to GStreamer's system-memory PipeWire path on Bazzite. The Fedora-tested DMA-BUF/GL bridge remains available with `LOGILIGHTSHOW_ENABLE_DMABUF=1`, but Bazzite's current Mesa/GStreamer GL download produced black pixels on this machine.
+Desktop Mode defaults to GStreamer's system-memory PipeWire path on Bazzite. The Fedora-tested DMA-BUF/GL bridge remains available with `LOGIG560_ENABLE_DMABUF=1`, but Bazzite's current Mesa/GStreamer GL download produced black pixels on this machine.
 
 GNOME's portal capture can leave a healthy PipeWire stream temporarily silent during static or low-motion scenes. The Desktop capture backend now holds the last dimension-validated frame after 200 ms without a new buffer. This keeps the engine below its 500 ms capture-stall cutoff without duplicating the normal ~19 FPS feed. GStreamer bus errors, EOS, caps renegotiation, and startup without a valid frame bypass the hold.
 
@@ -39,7 +39,7 @@ GNOME's portal capture can leave a healthy PipeWire stream temporarily silent du
 
 Bazzite is immutable. Build and development tools belong in a Distrobox/Toolbox (or Bazzite-DX), while the USB permission rule belongs on the host. Installing the rule requires Polkit authentication. Do not attempt to make the whole host mutable with package-manager workarounds.
 
-The accepted machine uses Bazzite 43 GNOME (`bazzite-deck-gnome`) and a Fedora 43 Distrobox named `logilightshow`.
+The accepted machine uses Bazzite 43 GNOME (`bazzite-deck-gnome`) and a Fedora 43 Distrobox named `logig560`.
 
 ## Desktop bring-up
 
@@ -55,14 +55,14 @@ sudo dnf install -y \
 Build with the repository mounted from the host:
 
 ```bash
-distrobox enter logilightshow -- bash -lc \
-  'cd /home/jaret/Documents/LogiLightShow && cargo test --all-targets && cargo build --release'
+distrobox enter logig560 -- bash -lc \
+  'cd /home/jaret/Documents/G560 Linux Utility && cargo test --all-targets && cargo build --release'
 ```
 
 On the Bazzite host, install the permission rule and verify the device:
 
 ```bash
-cd /home/jaret/Documents/LogiLightShow
+cd /home/jaret/Documents/G560 Linux Utility
 ./scripts/install-udev-rule.sh
 lsusb -d 046d:0a78
 ```
@@ -70,8 +70,8 @@ lsusb -d 046d:0a78
 Unplug/replug the G560 if the current USB node did not receive a user ACL. Run the release binary on the host as the logged-in user:
 
 ```bash
-./target/release/logilightshow capture-test --saved-permission --frames 30
-./target/release/logilightshow run
+./target/release/logig560 capture-test --saved-permission --frames 30
+./target/release/logig560 run
 ```
 
 The portal is the authority for monitor selection. Exactly one monitor is requested and accepted.
@@ -83,13 +83,13 @@ Bazzite's `gamescope-session-plus` deliberately disables desktop portals, so the
 Commands:
 
 ```bash
-./target/release/logilightshow capture-test --gamescope --frames 5
-./target/release/logilightshow run-gaming
+./target/release/logig560 capture-test --gamescope --frames 5
+./target/release/logig560 run-gaming
 ./scripts/install-gaming-service.sh
 ./scripts/uninstall-gaming-service.sh
 ```
 
-`systemd/logilightshow-gaming.service` is enabled as a user unit under `gamescope-session-plus@steam.service.wants`. It is `PartOf=gamescope-session-plus@steam.service`, starts only with the Steam Gamescope session, retries failures, and receives SIGTERM on session shutdown so the engine can black out the speakers. It does not use a portal, claim audio interfaces, or require root.
+`systemd/logig560-gaming.service` is enabled as a user unit under `gamescope-session-plus@steam.service.wants`. It is `PartOf=gamescope-session-plus@steam.service`, starts only with the Steam Gamescope session, retries failures, and receives SIGTERM on session shutdown so the engine can black out the speakers. It does not use a portal, claim audio interfaces, or require root.
 
 A nested Gamescope test with a rendered GL scene captured non-black 160×90 frames at a steady 20 FPS, with distinct sampled zone colors. The user then confirmed the real DRM Gaming Mode service works in both the Steam shell and an in-game session and shuts down on return to Desktop Mode.
 

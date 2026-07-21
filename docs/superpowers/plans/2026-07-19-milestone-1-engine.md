@@ -1,4 +1,4 @@
-# LogiLightShow Milestone 1 Engine Implementation Plan
+# G560 Linux Utility Milestone 1 Engine Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -37,7 +37,7 @@
 - `src/engine.rs`: capture-to-sampler-to-USB coordination and statistics.
 - `src/main.rs`: diagnostic commands and live engine entry point.
 - `tests/engine_fake.rs`: end-to-end engine test with fake frame and light transports.
-- `contrib/70-logilightshow-g560.rules`: narrowly scoped device-access rule.
+- `contrib/70-g560.rules`: narrowly scoped device-access rule.
 - `scripts/install-udev-rule.sh`: Polkit-backed, explicit udev installation helper.
 - `docs/hardware/g560-zone-map.md`: physical zone verification record.
 - `docs/hardware/milestone-1-results.md`: repeatable latency, throughput, resource, and recovery results.
@@ -69,7 +69,7 @@ Create the manifests and tests. `Cargo.toml` must use:
 
 ```toml
 [package]
-name = "logilightshow"
+name = "logig560"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.97.1"
@@ -308,7 +308,7 @@ Expected: compilation fails because USB modules are absent.
 handle.write_control(0x21, 0x09, 0x0211, 0x0002, &report, Duration::from_millis(100))
 ```
 
-Require exactly 20 bytes written. `G560::blackout` sends four black reports. Implement `logilightshow set-zones --left-rear RRGGBB --left-front RRGGBB --right-front RRGGBB --right-rear RRGGBB`; reject malformed colors without opening USB.
+Require exactly 20 bytes written. `G560::blackout` sends four black reports. Implement `logig560 set-zones --left-rear RRGGBB --left-front RRGGBB --right-front RRGGBB --right-rear RRGGBB`; reject malformed colors without opening USB.
 
 - [ ] **Step 4: Verify without hardware and commit**
 
@@ -324,7 +324,7 @@ git commit -m "feat: add persistent G560 USB transport"
 ### Task 5: Safe device permission installation and physical zone verification
 
 **Files:**
-- Create: `contrib/70-logilightshow-g560.rules`
+- Create: `contrib/70-g560.rules`
 - Create: `scripts/install-udev-rule.sh`
 - Create: `docs/hardware/g560-zone-map.md`
 - Modify: `src/usb/device.rs`
@@ -341,7 +341,7 @@ The rule contains exactly:
 ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="046d", ATTR{idProduct}=="0a78", TAG+="uaccess"
 ```
 
-The installer must resolve its own directory, verify the source filename, then call `pkexec install -o root -g root -m 0644` for `/etc/udev/rules.d/70-logilightshow-g560.rules`, followed by `pkexec udevadm control --reload-rules` and `pkexec udevadm trigger --subsystem-match=usb --attr-match=idVendor=046d --attr-match=idProduct=0a78`. Test with `bash -n scripts/install-udev-rule.sh` and `udevadm test` against the current device sysfs path.
+The installer must resolve its own directory, verify the source filename, then call `pkexec install -o root -g root -m 0644` for `/etc/udev/rules.d/70-g560.rules`, followed by `pkexec udevadm control --reload-rules` and `pkexec udevadm trigger --subsystem-match=usb --attr-match=idVendor=046d --attr-match=idProduct=0a78`. Test with `bash -n scripts/install-udev-rule.sh` and `udevadm test` against the current device sysfs path.
 
 - [ ] **Step 2: Install the rule and verify user access**
 
@@ -433,7 +433,7 @@ git commit -m "feat: capture one portal-authorized monitor"
 - Create: `README.md`
 
 **Interfaces:**
-- Produces: `logilightshow run`, bounded reconnect behavior, printed performance statistics, and recorded acceptance results.
+- Produces: `logig560 run`, bounded reconnect behavior, printed performance statistics, and recorded acceptance results.
 
 - [ ] **Step 1: Write failing CLI and recovery tests**
 
@@ -447,7 +447,7 @@ Expected: new recovery tests fail because retry state is absent.
 
 - [ ] **Step 3: Implement the live command**
 
-`logilightshow run` opens one portal capture, writes the newly returned restore token to `~/.config/logilightshow/capture.toml` using mode `0600` and atomic rename, opens the G560, and calls `run_engine`. Handle Ctrl-C with a cancellation token. Every five seconds print captured FPS, rendered updates per second, dropped-frame count, and capture-to-write p50/p95/p99. On exit, print totals and attempt blackout before releasing USB.
+`logig560 run` opens one portal capture, writes the newly returned restore token to `~/.config/logig560/capture.toml` using mode `0600` and atomic rename, opens the G560, and calls `run_engine`. Handle Ctrl-C with a cancellation token. Every five seconds print captured FPS, rendered updates per second, dropped-frame count, and capture-to-write p50/p95/p99. On exit, print totals and attempt blackout before releasing USB.
 
 Use `directories = "6"` and `tokio-util = { version = "0.7", features = ["rt"] }`; add them to `Cargo.toml`. Logs include timings and states only, never pixel or color-history data.
 

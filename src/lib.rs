@@ -22,7 +22,7 @@ pub use engine::{
 };
 pub use frame::{Point, Polygon, RgbFrame, ZoneLayout, ZoneMasks};
 pub use latest::{LatestReceiver, LatestSender, latest_channel};
-pub use logilightshow_api::{
+pub use logig560_api::{
     API_VERSION, ApiError, BUS_NAME, CaptureBackend, DiagnosticCounters, HealthState,
     INTERFACE_NAME, LightingMode, ManualZone, ManualZoneUpdate, OBJECT_PATH, RgbColor,
     ServiceSnapshot, ZoneColor, ZoneId, validate_manual_updates,

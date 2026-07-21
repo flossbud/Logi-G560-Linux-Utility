@@ -1,13 +1,13 @@
 [Unit]
-Description=LogiLightShow ambient lighting for the desktop session
-Documentation=file:%h/.config/logilightshow/README
+Description=G560 Linux Utility ambient lighting for the desktop session
+Documentation=file:%h/.config/logig560/README
 After=graphical-session.target pipewire.service
 PartOf=graphical-session.target
 StartLimitIntervalSec=0
 
 [Service]
 Type=simple
-ExecStart=@LOGILIGHTSHOW_BINARY@ run
+ExecStart=@LOGIG560_BINARY@ run
 Restart=on-failure
 RestartSec=2s
 TimeoutStopSec=10s

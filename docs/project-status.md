@@ -4,14 +4,14 @@ Last updated: 2026-07-20.
 
 ## One-sentence status
 
-LogiLightShow is an accepted command-line prototype for low-latency, four-zone Logitech G560 screen matching on Fedora/Bazzite GNOME and Gamescope, now with a persistent Unix-socket lighting service and a Tauri 2 GUI (`crates/logilightshow-gui/`) driving Manual, Content-Aware, setup, and diagnostics workflows; it is not yet a packaged end-user application.
+G560 Linux Utility is an accepted command-line prototype for low-latency, four-zone Logitech G560 screen matching on Fedora/Bazzite GNOME and Gamescope, now with a persistent Unix-socket lighting service and a Tauri 2 GUI (`crates/logig560-gui/`) driving Manual, Content-Aware, setup, and diagnostics workflows; it is not yet a packaged end-user application.
 
 ## GUI increment (2026-07-20)
 
-- `crates/logilightshow-api/` — shared DTOs and the newline-delimited JSON protocol used by both service and GUI.
-- `src/service/` — Unix-socket service (`$XDG_RUNTIME_DIR/logilightshow.sock`) exposed by the existing `run`/`run-gaming` commands. Reuses the accepted engine, capture backends, and USB writer unchanged.
-- `crates/logilightshow-gui/` — Tauri 2 GUI with a framework-free HTML/CSS/JS frontend. Ships the mockup speakers, four rail pages, first-run overlay, `pkexec` udev installer, systemd user-unit installer, and color-free diagnostics.
-- `systemd/logilightshow-desktop.service.in` — template used by the GUI to install a per-user Desktop service against the current binary path.
+- `crates/logig560-api/` — shared DTOs and the newline-delimited JSON protocol used by both service and GUI.
+- `src/service/` — Unix-socket service (`$XDG_RUNTIME_DIR/logig560.sock`) exposed by the existing `run`/`run-gaming` commands. Reuses the accepted engine, capture backends, and USB writer unchanged.
+- `crates/logig560-gui/` — Tauri 2 GUI with a framework-free HTML/CSS/JS frontend. Ships the mockup speakers, four rail pages, first-run overlay, `pkexec` udev installer, systemd user-unit installer, and color-free diagnostics.
+- `systemd/logig560-desktop.service.in` — template used by the GUI to install a per-user Desktop service against the current binary path.
 
 ## Proven working
 
@@ -54,19 +54,19 @@ The 2026-07-20 Arch KDE validation captured 30/30 non-black frames at 160x90, su
 - Accepted Bazzite baseline: `348e08c` (`feat: add accepted Bazzite desktop and gaming support`).
 - KDE work starts from that committed baseline; the Bazzite source/runtime changes are no longer an uncommitted working-tree payload.
 - There is no configured remote in the accepted workspace.
-- `LogiLightShow-Bazzite-handoff.zip` is the original transferred snapshot.
-- `LogiLightShow-Bazzite-prototype-final.zip` is the pre-documentation accepted Bazzite snapshot.
-- `LogiLightShow-Bazzite-agent-handoff.zip` is the current source-and-documentation handoff. The two earlier archives are preserved as immutable evidence rather than overwritten.
+- `G560 Linux Utility-Bazzite-handoff.zip` is the original transferred snapshot.
+- `G560 Linux Utility-Bazzite-prototype-final.zip` is the pre-documentation accepted Bazzite snapshot.
+- `G560 Linux Utility-Bazzite-agent-handoff.zip` is the current source-and-documentation handoff. The two earlier archives are preserved as immutable evidence rather than overwritten.
 
 Agents must inspect `git status --short` and preserve this state. Never use `git clean`, `git reset --hard`, or a blanket checkout here.
 
 ## Runtime integration state on the accepted machine
 
-- Desktop testing uses a transient user unit named `logilightshow-desktop-live.service`.
+- Desktop testing uses a transient user unit named `logig560-desktop-live.service`.
 - The Gaming Mode unit is installed by symlink from the repository, enabled under `gamescope-session-plus@steam.service.wants`, and expected to be inactive while GNOME Desktop Mode is active.
-- The release binary is loaded from `target/release/logilightshow`.
-- The saved desktop portal token is at `~/.config/logilightshow/capture.toml`, mode `0600`.
-- The repository currently lives at `/home/jaret/Documents/LogiLightShow`; the Gaming Mode unit's `ExecStart` depends on that location.
+- The release binary is loaded from `target/release/logig560`.
+- The saved desktop portal token is at `~/.config/logig560/capture.toml`, mode `0600`.
+- The repository currently lives at `/home/jaret/Documents/G560 Linux Utility`; the Gaming Mode unit's `ExecStart` depends on that location.
 
 Runtime state is ephemeral. Verify it rather than assuming it from this document.
 
