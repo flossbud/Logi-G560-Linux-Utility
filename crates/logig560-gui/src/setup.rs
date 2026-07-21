@@ -355,6 +355,81 @@ pub fn install_gaming_service_unit() -> ActionOutcome {
     ))
 }
 
+pub fn uninstall_service_unit() -> ActionOutcome {
+    let _ = run_systemctl(&["disable", "--now", SERVICE_UNIT_NAME]);
+    let unit_path = match service_unit_path() {
+        Ok(p) => p,
+        Err(err) => return ActionOutcome::err(err),
+    };
+    if unit_path.exists()
+        && let Err(err) = fs::remove_file(&unit_path)
+    {
+        return ActionOutcome::err(anyhow!("remove {}: {err}", unit_path.display()));
+    }
+    let _ = run_systemctl(&["daemon-reload"]);
+    ActionOutcome::ok(format!("desktop service uninstalled ({})", unit_path.display()))
+}
+
+pub fn uninstall_gaming_service_unit() -> ActionOutcome {
+    let _ = run_systemctl(&["disable", GAMING_UNIT_NAME]);
+    let wants = match gaming_wants_symlink_path() {
+        Ok(p) => p,
+        Err(err) => return ActionOutcome::err(err),
+    };
+    if wants.symlink_metadata().is_ok()
+        && let Err(err) = fs::remove_file(&wants)
+    {
+        return ActionOutcome::err(anyhow!("remove {}: {err}", wants.display()));
+    }
+    let unit_path = match gaming_unit_path() {
+        Ok(p) => p,
+        Err(err) => return ActionOutcome::err(err),
+    };
+    if unit_path.exists()
+        && let Err(err) = fs::remove_file(&unit_path)
+    {
+        return ActionOutcome::err(anyhow!("remove {}: {err}", unit_path.display()));
+    }
+    let _ = run_systemctl(&["daemon-reload"]);
+    ActionOutcome::ok(format!(
+        "gaming service uninstalled ({} and wants symlink)",
+        unit_path.display()
+    ))
+}
+
+pub fn gaming_service_action(action: &str) -> ActionOutcome {
+    match action {
+        "start" | "stop" | "restart" | "reload" => {}
+        _ => return ActionOutcome::err(anyhow!("unsupported systemctl action: {action}")),
+    }
+    if run_systemctl(&[action, GAMING_UNIT_NAME]) {
+        ActionOutcome::ok(format!("systemctl --user {action} succeeded"))
+    } else {
+        ActionOutcome::err(anyhow!("systemctl --user {action} failed"))
+    }
+}
+
+pub fn relink_launcher() -> ActionOutcome {
+    use crate::setup::launch::{
+        LaunchContext, detect_launch_context, ensure_launcher, home_bin_dir,
+    };
+    match detect_launch_context() {
+        LaunchContext::AppImage { appimage_path } => {
+            let bin_dir = match home_bin_dir() {
+                Ok(p) => p,
+                Err(err) => return ActionOutcome::err(err),
+            };
+            match ensure_launcher(&bin_dir, &appimage_path) {
+                Ok(path) => ActionOutcome::ok(format!("launcher re-linked at {}", path.display())),
+                Err(err) => ActionOutcome::err(err),
+            }
+        }
+        LaunchContext::DevBuild { .. } => ActionOutcome::err(anyhow!(
+            "not running from an AppImage; no launcher script to re-link"
+        )),
+    }
+}
+
 pub fn service_action(action: &str) -> ActionOutcome {
     match action {
         "start" | "stop" | "restart" | "reload" => {}

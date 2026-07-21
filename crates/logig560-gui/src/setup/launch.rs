@@ -121,6 +121,77 @@ pub fn launcher_path() -> Result<PathBuf> {
     Ok(home_bin_dir()?.join("logig560"))
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum LauncherState {
+    /// No launcher script found.
+    Missing,
+    /// Launcher exists and its embedded AppImage path matches the current one.
+    Current,
+    /// Launcher exists but points at a different AppImage path (moved/renamed).
+    Stale { embedded: PathBuf },
+    /// Launcher exists but its contents are not a script we recognise
+    /// (user hand-edited or a stale foreign file).
+    Unknown,
+}
+
+pub fn verify_launcher_at(bin_dir: &Path, current_appimage: &Path) -> LauncherState {
+    let launcher = bin_dir.join("logig560");
+    let contents = match fs::read_to_string(&launcher) {
+        Ok(c) => c,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return LauncherState::Missing,
+        Err(_) => return LauncherState::Unknown,
+    };
+    let Some(embedded) = extract_launcher_appimage_path(&contents) else {
+        return LauncherState::Unknown;
+    };
+    if embedded == current_appimage {
+        LauncherState::Current
+    } else {
+        LauncherState::Stale { embedded }
+    }
+}
+
+pub fn verify_launcher(current_appimage: &Path) -> Result<LauncherState> {
+    Ok(verify_launcher_at(&home_bin_dir()?, current_appimage))
+}
+
+fn extract_launcher_appimage_path(script: &str) -> Option<PathBuf> {
+    // The generated script's exec line is:  exec 'PATH' --cli "$@"
+    for line in script.lines() {
+        let line = line.trim_start();
+        if !line.starts_with("exec ") {
+            continue;
+        }
+        let rest = line.trim_start_matches("exec ").trim_start();
+        if !rest.starts_with('\'') {
+            return None;
+        }
+        // Find the closing single quote, accounting for the '\'' escape.
+        let mut chars = rest.char_indices();
+        chars.next(); // consume opening '
+        let mut buf = String::new();
+        while let Some((i, ch)) = chars.next() {
+            if ch == '\'' {
+                // Check for '\'' escape: next three chars should be \\''.
+                let tail = &rest[i..];
+                if tail.starts_with("'\\''") {
+                    buf.push('\'');
+                    // Skip \''
+                    chars.next();
+                    chars.next();
+                    chars.next();
+                    continue;
+                }
+                return Some(PathBuf::from(buf));
+            }
+            buf.push(ch);
+        }
+        return None;
+    }
+    None
+}
+
 /// Desktop unit template baked into the GUI binary.
 const DESKTOP_UNIT_TEMPLATE: &str =
     include_str!("../../../../systemd/logig560-desktop.service.in");

@@ -7,8 +7,8 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 
 use logig560_gui::setup::launch::{
-    LaunchContext, detect_launch_context_with, ensure_launcher, render_desktop_unit,
-    render_gaming_unit,
+    LaunchContext, LauncherState, detect_launch_context_with, ensure_launcher, render_desktop_unit,
+    render_gaming_unit, verify_launcher_at,
 };
 
 #[test]
@@ -144,4 +144,39 @@ fn gaming_unit_dev_build_uses_binary_path() {
         "rendered gaming unit missing dev ExecStart:\n{rendered}",
     );
     assert!(!rendered.contains("@LAUNCHER@"), "placeholder not substituted");
+}
+
+#[test]
+fn launcher_missing_when_no_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let bin_dir = dir.path().join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    let state = verify_launcher_at(&bin_dir, &PathBuf::from("/tmp/anything.AppImage"));
+    assert!(matches!(state, LauncherState::Missing));
+}
+
+#[test]
+fn launcher_current_when_paths_match() {
+    let dir = tempfile::tempdir().unwrap();
+    let bin_dir = dir.path().join("bin");
+    let appimage = PathBuf::from("/home/user/G560.AppImage");
+    ensure_launcher(&bin_dir, &appimage).unwrap();
+
+    let state = verify_launcher_at(&bin_dir, &appimage);
+    assert!(matches!(state, LauncherState::Current), "got {:?}", state);
+}
+
+#[test]
+fn launcher_stale_when_paths_differ() {
+    let dir = tempfile::tempdir().unwrap();
+    let bin_dir = dir.path().join("bin");
+    ensure_launcher(&bin_dir, &PathBuf::from("/old/G560.AppImage")).unwrap();
+
+    let state = verify_launcher_at(&bin_dir, &PathBuf::from("/new/G560.AppImage"));
+    match state {
+        LauncherState::Stale { embedded } => {
+            assert_eq!(embedded, PathBuf::from("/old/G560.AppImage"));
+        }
+        other => panic!("expected Stale, got {other:?}"),
+    }
 }
