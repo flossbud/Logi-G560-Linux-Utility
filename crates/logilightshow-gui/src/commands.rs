@@ -41,6 +41,15 @@ pub async fn get_snapshot(state: tauri::State<'_, ServiceClient>) -> Result<Comm
     Ok(to_outcome(state.send(ClientCommand::GetSnapshot).await))
 }
 
+/// Log a message from the frontend into the Rust tracing subscriber.
+/// Handy for user bug reports and diagnosing UI-side issues without
+/// needing the WebView devtools open.
+#[tauri::command]
+pub async fn frontend_log(message: String) -> Result<(), ()> {
+    tracing::info!(target: "frontend", "{message}");
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn set_lights_enabled(
     enabled: bool,

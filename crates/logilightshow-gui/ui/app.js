@@ -3,8 +3,30 @@
 // every user action dispatches a typed Tauri command and the UI paints
 // from the returned or broadcast ServiceSnapshot.
 
-const invoke = window.__TAURI__.core.invoke;
-const listen = window.__TAURI__.event.listen;
+const invoke = window.__TAURI__?.core?.invoke;
+const listen = window.__TAURI__?.event?.listen;
+
+// Report frontend problems into the Rust tracing subscriber so bug reports
+// have real evidence without asking users to open WebView devtools.
+function report(msg) {
+  console.warn("[frontend]", msg);
+  if (invoke) {
+    invoke("frontend_log", { message: String(msg) }).catch(() => {});
+  }
+}
+
+if (!invoke || !listen) {
+  report(
+    `Tauri globals missing: invoke=${!!invoke} listen=${!!listen} — check tauri.conf.json withGlobalTauri`,
+  );
+}
+
+window.addEventListener("error", (e) => {
+  report(`window.error: ${e.message} @ ${e.filename}:${e.lineno}`);
+});
+window.addEventListener("unhandledrejection", (e) => {
+  report(`unhandled: ${e.reason}`);
+});
 
 const ZONES = ["left-rear", "left-front", "right-front", "right-rear"];
 const GROUPS = {
@@ -788,26 +810,34 @@ async function bootstrap() {
 
   switchPage("lighting");
 
-  await listen("snapshot-changed", (event) => {
-    state.snapshot = event.payload;
-    render();
-  });
-  await listen("connection-state", (event) => {
-    state.connection = event.payload;
-    render();
-  });
+  try {
+    await listen("snapshot-changed", (event) => {
+      state.snapshot = event.payload;
+      render();
+    });
+  } catch (err) {
+    report(`listen snapshot-changed failed: ${err}`);
+  }
+  try {
+    await listen("connection-state", (event) => {
+      state.connection = event.payload;
+      render();
+    });
+  } catch (err) {
+    report(`listen connection-state failed: ${err}`);
+  }
 
   try {
-    const conn = await invoke("get_connection_state");
-    state.connection = conn;
+    state.connection = await invoke("get_connection_state");
   } catch (err) {
+    report(`get_connection_state failed: ${err}`);
     state.connection = { kind: "disconnected", reason: String(err) };
   }
   try {
     const cached = await invoke("get_cached_snapshot");
     if (cached) state.snapshot = cached;
   } catch (err) {
-    console.warn("get_cached_snapshot failed", err);
+    report(`get_cached_snapshot failed: ${err}`);
   }
   render();
 }

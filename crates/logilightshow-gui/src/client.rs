@@ -66,8 +66,11 @@ struct Outbound {
 impl ServiceClient {
     pub fn spawn(socket_path: PathBuf) -> Self {
         let (request_tx, request_rx) = mpsc::channel::<Outbound>(32);
-        let (snapshot_tx, _) = broadcast::channel::<ServiceSnapshot>(16);
-        let (state_tx, _) = broadcast::channel::<ConnectionState>(16);
+        // Snapshots come in at up to the engine's ~20 FPS in Content-Aware
+        // mode. Give the ring buffer room so a briefly slow emitter drops
+        // stale intermediate snapshots without falling off the channel.
+        let (snapshot_tx, _) = broadcast::channel::<ServiceSnapshot>(256);
+        let (state_tx, _) = broadcast::channel::<ConnectionState>(64);
         let inner = Arc::new(Inner {
             request_tx,
             snapshot_tx: snapshot_tx.clone(),

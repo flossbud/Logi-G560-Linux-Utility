@@ -113,6 +113,8 @@ pub async fn run_service(options: ServiceOptions) -> Result<()> {
         return Err(err.context("initial G560 blackout failed"));
     }
     info!("G560 opened; initial safety blackout complete");
+    model.confirm_write(ZoneColors::BLACK);
+    publish_snapshot(&model, engine.as_ref(), &sink_metrics, &snapshot_tx);
 
     match (model.config().lights_enabled, model.config().mode) {
         (true, LightingMode::Manual) => {

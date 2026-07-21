@@ -13,7 +13,7 @@ directories = "6"
 logilightshow-api = { path = "../logilightshow-api" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["devtools"] }
 tokio = { version = "1.51", features = ["io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

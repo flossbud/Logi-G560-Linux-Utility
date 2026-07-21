@@ -1,5 +1,6 @@
 use tauri::{Emitter, Manager};
-use tracing::{info, warn};
+use tokio::sync::broadcast::error::RecvError;
+use tracing::{debug, info, warn};
 use tracing_subscriber::EnvFilter;
 
 mod client;
@@ -41,8 +42,14 @@ fn main() {
                                 warn!(?err, "failed to emit snapshot-changed");
                             }
                         }
-                        Err(err) => {
-                            warn!(?err, "snapshot subscription ended");
+                        Err(RecvError::Lagged(skipped)) => {
+                            debug!(
+                                skipped,
+                                "snapshot emitter lagged; dropped intermediate snapshots"
+                            );
+                        }
+                        Err(RecvError::Closed) => {
+                            warn!("snapshot subscription closed");
                             break;
                         }
                     }
@@ -59,8 +66,11 @@ fn main() {
                                 warn!(?err, "failed to emit connection-state");
                             }
                         }
-                        Err(err) => {
-                            warn!(?err, "connection-state subscription ended");
+                        Err(RecvError::Lagged(skipped)) => {
+                            debug!(skipped, "connection-state emitter lagged");
+                        }
+                        Err(RecvError::Closed) => {
+                            warn!("connection-state subscription closed");
                             break;
                         }
                     }
@@ -69,6 +79,7 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            commands::frontend_log,
             commands::get_snapshot,
             commands::set_lights_enabled,
             commands::set_mode,
