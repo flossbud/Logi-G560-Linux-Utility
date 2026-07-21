@@ -2,9 +2,11 @@
 //! generation. Uses tempdirs to avoid touching the developer's real
 //! ~/.local/bin.
 
+use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 
-use logig560_gui::setup::launch::{LaunchContext, detect_launch_context_with};
+use logig560_gui::setup::launch::{LaunchContext, detect_launch_context_with, ensure_launcher};
 
 #[test]
 fn detects_appimage_context_when_env_var_set() {
@@ -38,4 +40,52 @@ fn detects_dev_build_when_no_appimage_env() {
         }
         LaunchContext::AppImage { .. } => panic!("expected DevBuild context"),
     }
+}
+
+#[test]
+fn writes_launcher_script_with_exec_bit() {
+    let dir = tempfile::tempdir().unwrap();
+    let bin_dir = dir.path().join("bin");
+    let appimage = PathBuf::from("/tmp/fake/G560.AppImage");
+
+    let launcher = ensure_launcher(&bin_dir, &appimage).expect("ensure_launcher succeeded");
+
+    assert_eq!(launcher, bin_dir.join("logig560"));
+    let contents = fs::read_to_string(&launcher).unwrap();
+    assert!(contents.starts_with("#!/bin/sh"), "shebang missing: {contents}");
+    assert!(contents.contains("--cli"), "launcher must add --cli prefix: {contents}");
+    assert!(
+        contents.contains("/tmp/fake/G560.AppImage"),
+        "launcher must embed AppImage path: {contents}",
+    );
+    let mode = fs::metadata(&launcher).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o755, "launcher must be user-executable");
+}
+
+#[test]
+fn ensure_launcher_creates_missing_parent_dir() {
+    let dir = tempfile::tempdir().unwrap();
+    let bin_dir = dir.path().join("nested/local/bin");
+    let appimage = PathBuf::from("/tmp/fake/G560.AppImage");
+
+    let launcher = ensure_launcher(&bin_dir, &appimage).expect("ensure_launcher succeeded");
+    assert!(launcher.is_file());
+}
+
+#[test]
+fn ensure_launcher_shell_escapes_appimage_path() {
+    let dir = tempfile::tempdir().unwrap();
+    let bin_dir = dir.path().join("bin");
+    // A path with a single quote would break naive quoting.
+    let appimage = PathBuf::from("/tmp/weird 'name'/G560.AppImage");
+
+    let launcher = ensure_launcher(&bin_dir, &appimage).expect("ensure_launcher succeeded");
+    let contents = fs::read_to_string(&launcher).unwrap();
+    // The script must be shell-parseable. Run `sh -n` (parse-only) to verify.
+    let status = std::process::Command::new("sh")
+        .arg("-n")
+        .arg(&launcher)
+        .status()
+        .expect("sh available");
+    assert!(status.success(), "generated launcher is not shell-parseable:\n{contents}");
 }
