@@ -2,8 +2,13 @@
 //! a dev build so downstream code (launcher, systemd unit generation)
 //! can choose the right ExecStart target.
 
+use std::fs;
 use std::io;
-use std::path::PathBuf;
+use std::io::Write as _;
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::path::{Path, PathBuf};
+
+use anyhow::{Context, Result, anyhow};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LaunchContext {
@@ -43,13 +48,6 @@ where
     LaunchContext::DevBuild { cli_binary }
 }
 
-use std::fs;
-use std::io::Write as _;
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-use std::path::Path;
-
-use anyhow::{Context, Result, anyhow};
-
 /// Write `<bin_dir>/logig560` as an executable POSIX-sh script that
 /// re-execs `appimage_path` with `--cli`. Creates `bin_dir` if missing.
 pub fn ensure_launcher(bin_dir: &Path, appimage_path: &Path) -> Result<PathBuf> {
@@ -69,7 +67,7 @@ pub fn ensure_launcher(bin_dir: &Path, appimage_path: &Path) -> Result<PathBuf> 
     );
     // Atomic write: temp file + rename in same dir, then chmod 0755.
     let tmp = bin_dir.join(".logig560.tmp");
-    {
+    let write_tmp = || -> Result<()> {
         let mut file = fs::OpenOptions::new()
             .write(true)
             .create(true)
@@ -80,6 +78,11 @@ pub fn ensure_launcher(bin_dir: &Path, appimage_path: &Path) -> Result<PathBuf> 
         file.write_all(script.as_bytes())
             .with_context(|| format!("write {}", tmp.display()))?;
         file.sync_all().ok();
+        Ok(())
+    };
+    if let Err(err) = write_tmp() {
+        let _ = fs::remove_file(&tmp);
+        return Err(err);
     }
     fs::rename(&tmp, &launcher)
         .with_context(|| format!("rename {} -> {}", tmp.display(), launcher.display()))?;
@@ -105,9 +108,7 @@ fn shell_single_quote(value: &str) -> String {
     out
 }
 
-/// Convenience: resolve the user's `~/.local/bin`. Errors if HOME is
-/// unset or points at a non-directory (extremely unlikely in a normal
-/// session but worth surfacing rather than panicking).
+/// Convenience: resolve the user's `~/.local/bin`. Errors if HOME is unset.
 pub fn home_bin_dir() -> Result<PathBuf> {
     let home = std::env::var_os("HOME")
         .map(PathBuf::from)
