@@ -259,10 +259,9 @@ pub fn gaming_wants_symlink_path() -> Result<PathBuf> {
 }
 
 pub fn check_gaming_service_status() -> ServiceStatus {
-    let unit_path = gaming_unit_path()
-        .map(|p| p.display().to_string())
-        .unwrap_or_default();
-    let unit_installed = gaming_unit_path().map(|p| p.is_file()).unwrap_or(false);
+    let path = gaming_unit_path().ok();
+    let unit_path = path.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
+    let unit_installed = path.as_ref().map(|p| p.is_file()).unwrap_or(false);
     let enabled = systemctl_check(&["is-enabled", GAMING_UNIT_NAME]);
     let active = systemctl_check(&["is-active", GAMING_UNIT_NAME]);
     let failed = systemctl_check(&["is-failed", GAMING_UNIT_NAME]);
@@ -329,7 +328,14 @@ pub fn install_gaming_service_unit() -> ActionOutcome {
     {
         return ActionOutcome::err(anyhow!("create {}: {err}", parent.display()));
     }
-    let _ = fs::remove_file(&wants);
+    if let Err(err) = fs::remove_file(&wants)
+        && err.kind() != std::io::ErrorKind::NotFound
+    {
+        return ActionOutcome::err(anyhow!(
+            "remove existing wants entry {}: {err}",
+            wants.display()
+        ));
+    }
     if let Err(err) = std::os::unix::fs::symlink(&unit_path, &wants) {
         return ActionOutcome::err(anyhow!("symlink {}: {err}", wants.display()));
     }

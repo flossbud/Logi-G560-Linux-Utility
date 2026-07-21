@@ -131,4 +131,17 @@ fn gaming_unit_appimage_uses_launcher_run_gaming() {
         "rendered gaming unit missing launcher ExecStart:\n{rendered}",
     );
     assert!(rendered.contains("PartOf=gamescope-session-plus@steam.service"));
+    assert!(!rendered.contains("@LAUNCHER@"), "placeholder not substituted");
+}
+
+#[test]
+fn gaming_unit_dev_build_uses_binary_path() {
+    let cli = PathBuf::from("/home/user/proj/target/release/logig560");
+    let ctx = LaunchContext::DevBuild { cli_binary: cli.clone() };
+    let rendered = render_gaming_unit(&ctx, &cli);
+    assert!(
+        rendered.contains("ExecStart=/home/user/proj/target/release/logig560 run-gaming"),
+        "rendered gaming unit missing dev ExecStart:\n{rendered}",
+    );
+    assert!(!rendered.contains("@LAUNCHER@"), "placeholder not substituted");
 }
