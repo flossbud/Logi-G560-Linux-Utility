@@ -260,7 +260,10 @@ pub fn gaming_wants_symlink_path() -> Result<PathBuf> {
 
 pub fn check_gaming_service_status() -> ServiceStatus {
     let path = gaming_unit_path().ok();
-    let unit_path = path.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
+    let unit_path = path
+        .as_ref()
+        .map(|p| p.display().to_string())
+        .unwrap_or_default();
     let unit_installed = path.as_ref().map(|p| p.is_file()).unwrap_or(false);
     let enabled = systemctl_check(&["is-enabled", GAMING_UNIT_NAME]);
     let active = systemctl_check(&["is-active", GAMING_UNIT_NAME]);
@@ -345,9 +348,7 @@ pub fn install_gaming_service_unit() -> ActionOutcome {
     // NOTE: we do NOT `--now` this in Desktop Mode; it must remain
     // enabled-but-inactive until gamescope-session starts.
     if !run_systemctl(&["enable", GAMING_UNIT_NAME]) {
-        return ActionOutcome::err(anyhow!(
-            "systemctl --user enable {GAMING_UNIT_NAME} failed"
-        ));
+        return ActionOutcome::err(anyhow!("systemctl --user enable {GAMING_UNIT_NAME} failed"));
     }
     ActionOutcome::ok(format!(
         "gaming unit installed at {} and enabled (inactive until Gaming Mode)",
@@ -367,7 +368,10 @@ pub fn uninstall_service_unit() -> ActionOutcome {
         return ActionOutcome::err(anyhow!("remove {}: {err}", unit_path.display()));
     }
     let _ = run_systemctl(&["daemon-reload"]);
-    ActionOutcome::ok(format!("desktop service uninstalled ({})", unit_path.display()))
+    ActionOutcome::ok(format!(
+        "desktop service uninstalled ({})",
+        unit_path.display()
+    ))
 }
 
 pub fn uninstall_gaming_service_unit() -> ActionOutcome {

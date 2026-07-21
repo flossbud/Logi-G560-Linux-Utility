@@ -22,7 +22,10 @@ fn detects_appimage_context_when_env_var_set() {
     );
     match ctx {
         LaunchContext::AppImage { appimage_path } => {
-            assert_eq!(appimage_path, PathBuf::from("/home/user/Downloads/G560.AppImage"));
+            assert_eq!(
+                appimage_path,
+                PathBuf::from("/home/user/Downloads/G560.AppImage")
+            );
         }
         LaunchContext::DevBuild { .. } => panic!("expected AppImage context"),
     }
@@ -55,8 +58,14 @@ fn writes_launcher_script_with_exec_bit() {
 
     assert_eq!(launcher, bin_dir.join("logig560"));
     let contents = fs::read_to_string(&launcher).unwrap();
-    assert!(contents.starts_with("#!/bin/sh"), "shebang missing: {contents}");
-    assert!(contents.contains("--cli"), "launcher must add --cli prefix: {contents}");
+    assert!(
+        contents.starts_with("#!/bin/sh"),
+        "shebang missing: {contents}"
+    );
+    assert!(
+        contents.contains("--cli"),
+        "launcher must add --cli prefix: {contents}"
+    );
     assert!(
         contents.contains("/tmp/fake/G560.AppImage"),
         "launcher must embed AppImage path: {contents}",
@@ -90,7 +99,10 @@ fn ensure_launcher_shell_escapes_appimage_path() {
         .arg(&launcher)
         .status()
         .expect("sh available");
-    assert!(status.success(), "generated launcher is not shell-parseable:\n{contents}");
+    assert!(
+        status.success(),
+        "generated launcher is not shell-parseable:\n{contents}"
+    );
 }
 
 #[test]
@@ -104,19 +116,27 @@ fn desktop_unit_appimage_uses_launcher_path() {
         rendered.contains("ExecStart=/home/user/.local/bin/logig560 run"),
         "rendered unit missing launcher ExecStart:\n{rendered}",
     );
-    assert!(!rendered.contains("@LAUNCHER@"), "placeholder not substituted");
+    assert!(
+        !rendered.contains("@LAUNCHER@"),
+        "placeholder not substituted"
+    );
 }
 
 #[test]
 fn desktop_unit_dev_build_uses_binary_path() {
     let cli = PathBuf::from("/home/user/proj/target/release/logig560");
-    let ctx = LaunchContext::DevBuild { cli_binary: cli.clone() };
+    let ctx = LaunchContext::DevBuild {
+        cli_binary: cli.clone(),
+    };
     let rendered = render_desktop_unit(&ctx, &cli);
     assert!(
         rendered.contains("ExecStart=/home/user/proj/target/release/logig560 run"),
         "rendered unit missing dev ExecStart:\n{rendered}",
     );
-    assert!(!rendered.contains("@LAUNCHER@"), "placeholder not substituted");
+    assert!(
+        !rendered.contains("@LAUNCHER@"),
+        "placeholder not substituted"
+    );
 }
 
 #[test]
@@ -131,19 +151,27 @@ fn gaming_unit_appimage_uses_launcher_run_gaming() {
         "rendered gaming unit missing launcher ExecStart:\n{rendered}",
     );
     assert!(rendered.contains("PartOf=gamescope-session-plus@steam.service"));
-    assert!(!rendered.contains("@LAUNCHER@"), "placeholder not substituted");
+    assert!(
+        !rendered.contains("@LAUNCHER@"),
+        "placeholder not substituted"
+    );
 }
 
 #[test]
 fn gaming_unit_dev_build_uses_binary_path() {
     let cli = PathBuf::from("/home/user/proj/target/release/logig560");
-    let ctx = LaunchContext::DevBuild { cli_binary: cli.clone() };
+    let ctx = LaunchContext::DevBuild {
+        cli_binary: cli.clone(),
+    };
     let rendered = render_gaming_unit(&ctx, &cli);
     assert!(
         rendered.contains("ExecStart=/home/user/proj/target/release/logig560 run-gaming"),
         "rendered gaming unit missing dev ExecStart:\n{rendered}",
     );
-    assert!(!rendered.contains("@LAUNCHER@"), "placeholder not substituted");
+    assert!(
+        !rendered.contains("@LAUNCHER@"),
+        "placeholder not substituted"
+    );
 }
 
 #[test]

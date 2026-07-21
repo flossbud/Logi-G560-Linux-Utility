@@ -2,6 +2,6 @@
 //! integration tests exercise; the Tauri binary in src/main.rs
 //! consumes the same modules via `use logig560_gui::…`.
 
-pub mod setup;
 pub mod client;
 pub mod commands;
+pub mod setup;

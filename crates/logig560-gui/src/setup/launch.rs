@@ -23,10 +23,7 @@ pub enum LaunchContext {
 }
 
 pub fn detect_launch_context() -> LaunchContext {
-    detect_launch_context_with(
-        |name| std::env::var(name).ok(),
-        std::env::current_exe,
-    )
+    detect_launch_context_with(|name| std::env::var(name).ok(), std::env::current_exe)
 }
 
 pub fn detect_launch_context_with<E, C>(env: E, current_exe: C) -> LaunchContext
@@ -51,8 +48,7 @@ where
 /// Write `<bin_dir>/logig560` as an executable POSIX-sh script that
 /// re-execs `appimage_path` with `--cli`. Creates `bin_dir` if missing.
 pub fn ensure_launcher(bin_dir: &Path, appimage_path: &Path) -> Result<PathBuf> {
-    fs::create_dir_all(bin_dir)
-        .with_context(|| format!("create {}", bin_dir.display()))?;
+    fs::create_dir_all(bin_dir).with_context(|| format!("create {}", bin_dir.display()))?;
     let launcher = bin_dir.join("logig560");
     let script = format!(
         "#!/bin/sh\n\
@@ -193,8 +189,7 @@ fn extract_launcher_appimage_path(script: &str) -> Option<PathBuf> {
 }
 
 /// Desktop unit template baked into the GUI binary.
-const DESKTOP_UNIT_TEMPLATE: &str =
-    include_str!("../../../../systemd/logig560-desktop.service.in");
+const DESKTOP_UNIT_TEMPLATE: &str = include_str!("../../../../systemd/logig560-desktop.service.in");
 
 /// Substitute @LAUNCHER@ in the desktop unit template. `exec_target` is
 /// the launcher path (AppImage mode) or CLI binary path (dev mode).
@@ -203,8 +198,7 @@ pub fn render_desktop_unit(_ctx: &LaunchContext, exec_target: &Path) -> String {
 }
 
 /// Gaming unit template baked into the GUI binary.
-const GAMING_UNIT_TEMPLATE: &str =
-    include_str!("../../../../systemd/logig560-gaming.service.in");
+const GAMING_UNIT_TEMPLATE: &str = include_str!("../../../../systemd/logig560-gaming.service.in");
 
 /// Substitute @LAUNCHER@ in the gaming unit template. `exec_target` is
 /// the launcher path (AppImage mode) or CLI binary path (dev mode).
