@@ -73,6 +73,20 @@ fn main() {
                     }
                 }
             });
+
+            let launcher_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                let report = commands::verify_launcher_path().await.unwrap();
+                if matches!(
+                    report.state,
+                    logig560_gui::setup::launch::LauncherState::Stale { .. }
+                        | logig560_gui::setup::launch::LauncherState::Missing
+                ) && report.context == "appimage"
+                    && let Err(err) = launcher_handle.emit("launcher-status", &report)
+                {
+                    warn!(?err, "failed to emit launcher-status");
+                }
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -92,6 +106,13 @@ fn main() {
             commands::install_service_unit,
             commands::service_action,
             commands::version_info,
+            commands::check_gaming_service_status,
+            commands::install_gaming_service_unit,
+            commands::gaming_service_action,
+            commands::uninstall_service_unit,
+            commands::uninstall_gaming_service_unit,
+            commands::relink_launcher,
+            commands::verify_launcher_path,
         ])
         .run(tauri::generate_context!())
         .expect("failed to launch G560 Linux Utility GUI");

@@ -184,3 +184,108 @@ pub async fn version_info() -> Result<crate::setup::VersionInfo, ()> {
         .await
         .unwrap_or_else(|_| crate::setup::version_info()))
 }
+
+#[tauri::command]
+pub async fn check_gaming_service_status() -> Result<crate::setup::ServiceStatus, ()> {
+    Ok(
+        tokio::task::spawn_blocking(crate::setup::check_gaming_service_status)
+            .await
+            .unwrap_or_else(|_| crate::setup::ServiceStatus {
+                unit_installed: false,
+                unit_path: String::new(),
+                enabled: false,
+                active: false,
+                failed: false,
+                last_status: None,
+            }),
+    )
+}
+
+#[tauri::command]
+pub async fn install_gaming_service_unit() -> Result<crate::setup::ActionOutcome, ()> {
+    Ok(
+        tokio::task::spawn_blocking(crate::setup::install_gaming_service_unit)
+            .await
+            .unwrap_or_else(|err| crate::setup::ActionOutcome::Err {
+                error: format!("blocking task failed: {err}"),
+            }),
+    )
+}
+
+#[tauri::command]
+pub async fn gaming_service_action(action: String) -> Result<crate::setup::ActionOutcome, ()> {
+    Ok(
+        tokio::task::spawn_blocking(move || crate::setup::gaming_service_action(&action))
+            .await
+            .unwrap_or_else(|err| crate::setup::ActionOutcome::Err {
+                error: format!("blocking task failed: {err}"),
+            }),
+    )
+}
+
+#[tauri::command]
+pub async fn uninstall_service_unit() -> Result<crate::setup::ActionOutcome, ()> {
+    Ok(
+        tokio::task::spawn_blocking(crate::setup::uninstall_service_unit)
+            .await
+            .unwrap_or_else(|err| crate::setup::ActionOutcome::Err {
+                error: format!("blocking task failed: {err}"),
+            }),
+    )
+}
+
+#[tauri::command]
+pub async fn uninstall_gaming_service_unit() -> Result<crate::setup::ActionOutcome, ()> {
+    Ok(
+        tokio::task::spawn_blocking(crate::setup::uninstall_gaming_service_unit)
+            .await
+            .unwrap_or_else(|err| crate::setup::ActionOutcome::Err {
+                error: format!("blocking task failed: {err}"),
+            }),
+    )
+}
+
+#[tauri::command]
+pub async fn relink_launcher() -> Result<crate::setup::ActionOutcome, ()> {
+    Ok(tokio::task::spawn_blocking(crate::setup::relink_launcher)
+        .await
+        .unwrap_or_else(|err| crate::setup::ActionOutcome::Err {
+            error: format!("blocking task failed: {err}"),
+        }))
+}
+
+#[derive(serde::Serialize)]
+pub struct LauncherReport {
+    pub context: &'static str,
+    pub appimage_path: Option<String>,
+    pub state: crate::setup::launch::LauncherState,
+}
+
+#[tauri::command]
+pub async fn verify_launcher_path() -> Result<LauncherReport, ()> {
+    Ok(tokio::task::spawn_blocking(|| {
+        use crate::setup::launch::{LaunchContext, detect_launch_context, verify_launcher};
+        match detect_launch_context() {
+            LaunchContext::AppImage { appimage_path } => {
+                let state = verify_launcher(&appimage_path)
+                    .unwrap_or(crate::setup::launch::LauncherState::Unknown);
+                LauncherReport {
+                    context: "appimage",
+                    appimage_path: Some(appimage_path.to_string_lossy().to_string()),
+                    state,
+                }
+            }
+            LaunchContext::DevBuild { .. } => LauncherReport {
+                context: "dev",
+                appimage_path: None,
+                state: crate::setup::launch::LauncherState::Missing,
+            },
+        }
+    })
+    .await
+    .unwrap_or(LauncherReport {
+        context: "unknown",
+        appimage_path: None,
+        state: crate::setup::launch::LauncherState::Unknown,
+    }))
+}
