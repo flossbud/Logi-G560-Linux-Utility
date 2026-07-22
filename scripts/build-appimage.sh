@@ -232,7 +232,9 @@ if [[ -z "$SCANNER_SRC" ]]; then
     for candidate in \
         /usr/lib/x86_64-linux-gnu/gstreamer1.0/gstreamer-1.0/gst-plugin-scanner \
         /usr/libexec/gstreamer-1.0/gst-plugin-scanner \
-        /usr/lib64/gstreamer1.0/gst-plugin-scanner; do
+        /usr/lib64/gstreamer1.0/gst-plugin-scanner \
+        /usr/lib/gstreamer-1.0/gst-plugin-scanner \
+        /usr/lib64/gstreamer-1.0/gst-plugin-scanner; do
         if [[ -f "$candidate" ]]; then
             SCANNER_SRC="$candidate"
             break
@@ -261,32 +263,55 @@ if [[ -z "$WEBKIT_SO" ]]; then
     exit 1
 fi
 python3 - "$WEBKIT_SO" <<'PY'
+import re
 import sys
+
 path = sys.argv[1]
-# Original strings (build-system paths, null-terminated).
-targets = [
-    b'/usr/lib/x86_64-linux-gnu/webkit2gtk-4.1\x00',                    # 41 bytes
-    b'/usr/lib/x86_64-linux-gnu/webkit2gtk-4.1/injected-bundle/\x00',   # 57 bytes
-]
-# Replacements: fixed short prefix `/tmp/.g560wk` (12 chars). AppRun
-# symlinks /tmp/.g560wk -> $HERE/usr/lib/webkit2gtk-4.1 before launch.
-# Pad each replacement to match the original length with trailing NULs
-# so no file-offset shift is needed.
-replacements = [
-    b'/tmp/.g560wk\x00',                                                # helper dir
-    b'/tmp/.g560wk/injected-bundle/\x00',                               # injected bundle
-]
+
+# Discover the build-baked helper path directly from the .so contents.
+# Different distros hardcode different prefixes:
+#   Ubuntu/Debian: /usr/lib/x86_64-linux-gnu/webkit2gtk-4.1
+#   Fedora/RHEL:   /usr/lib64/webkit2gtk-4.1
+#   Arch:          /usr/lib/webkit2gtk-4.1
+# Match any absolute /usr/... prefix ending in /webkit2gtk-4.1, then patch
+# both the bare path and the "<path>/injected-bundle/" companion. Padded
+# to original length with NULs so no offset shift is needed.
 with open(path, 'rb') as f:
     data = bytearray(f.read())
-for target, repl in zip(targets, replacements):
-    idx = data.find(target)
-    if idx < 0:
-        raise SystemExit(f'error: pattern not found: {target!r}')
-    padded = repl + b'\x00' * (len(target) - len(repl))
+
+pattern = re.compile(rb'/usr/lib(?:64|/[a-z0-9_-]+-linux-gnu)?/webkit2gtk-4\.1\x00')
+matches = []
+for m in pattern.finditer(bytes(data)):
+    matches.append((m.start(), m.group()))
+if not matches:
+    raise SystemExit('error: no baked webkit2gtk-4.1 path found in ' + path)
+
+# Also find the injected-bundle variant (built from the same base + suffix).
+base_path = matches[0][1][:-1]  # strip trailing NUL for concatenation
+bundle_target = base_path + b'/injected-bundle/\x00'
+bundle_idx = data.find(bundle_target)
+
+# Replacements: fixed short prefix `/tmp/.g560wk` (12 chars). AppRun
+# symlinks /tmp/.g560wk -> $HERE/usr/lib/webkit2gtk-4.1 before launch.
+repl_base = b'/tmp/.g560wk\x00'
+repl_bundle = b'/tmp/.g560wk/injected-bundle/\x00'
+
+for idx, target in matches:
+    padded = repl_base + b'\x00' * (len(target) - len(repl_base))
     if len(padded) != len(target):
-        raise SystemExit('padding math wrong')
+        raise SystemExit('padding math wrong for base path')
     data[idx:idx + len(target)] = padded
-    print(f'  patched offset {idx}: {target[:-1].decode()} -> {repl[:-1].decode()}')
+    print(f'  patched offset {idx}: {target[:-1].decode()} -> /tmp/.g560wk')
+
+if bundle_idx >= 0:
+    padded = repl_bundle + b'\x00' * (len(bundle_target) - len(repl_bundle))
+    if len(padded) != len(bundle_target):
+        raise SystemExit('padding math wrong for injected-bundle')
+    data[bundle_idx:bundle_idx + len(bundle_target)] = padded
+    print(f'  patched offset {bundle_idx}: {bundle_target[:-1].decode()} -> /tmp/.g560wk/injected-bundle/')
+else:
+    print(f'  note: no injected-bundle variant present (this may be OK on some builds)')
+
 with open(path, 'wb') as f:
     f.write(data)
 PY
