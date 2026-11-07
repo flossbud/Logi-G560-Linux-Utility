@@ -24,6 +24,7 @@ There is no user configuration file for colors, brightness, geometry, transition
 | Variable | Effect | Default |
 |---|---|---|
 | `LOGIG560_ENABLE_DMABUF` | Any presence enables the optional Desktop DMA-BUF/GL bridge | unset; system-memory Desktop path |
+| `LOGIG560_TRANSPORT` | `hidraw` writes reports through the kernel hidraw node and keeps the speaker buttons working; `libusb` detaches the kernel HID driver and claims the interface | unset; `hidraw` |
 | `RUST_LOG` | No current effect; the binary does not initialize a tracing subscriber | unset |
 
 The DMABUF variable is a compatibility diagnostic, not a recommended Bazzite setting.

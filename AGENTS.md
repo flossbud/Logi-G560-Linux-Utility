@@ -37,7 +37,7 @@ Do not weaken these invariants:
 - Safety blackouts preempt normal transitions for capture loss/stall, cancellation, shutdown, and USB recovery.
 - Normal sampled darkness may fade; safety blackouts must remain immediate.
 - Keep USB report ordering and the calibrated 6 ms delay across every adjacent HID report, including across calls.
-- Do not detach a non-HID interface. The USB driver validates interface 2 before claiming it and reattaches the kernel driver on release.
+- Do not detach a non-HID interface. The libusb transport validates interface 2 before claiming it and reattaches the kernel driver on release. The default hidraw transport never detaches the kernel driver; keep it that way so the speaker buttons stay functional.
 - Preserve the physical zone mapping: logical `[left rear, left front, right front, right rear]` maps to protocol indexes `[0x02, 0x00, 0x01, 0x03]`.
 - Preserve clean shutdown: stop capture, request all-zone black, release USB, and close the portal/worker.
 - Desktop and Gaming Mode intentionally use different capture backends. Do not try to force the desktop portal into Gamescope.

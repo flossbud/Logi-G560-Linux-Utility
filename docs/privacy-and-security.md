@@ -80,7 +80,7 @@ The script installs one known file, reloads udev, and triggers the matching devi
 
 ## USB defensive checks
 
-Before detaching a kernel driver, the implementation:
+Before detaching a kernel driver (libusb transport only; the default hidraw transport never detaches it), the implementation:
 
 - finds USB interface 2;
 - validates all descriptors for that interface are HID;

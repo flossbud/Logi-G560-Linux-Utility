@@ -112,7 +112,8 @@ pub fn install_udev_rule() -> ActionOutcome {
         "install -o root -g root -m 0644 {src} {dst} && \
          udevadm control --reload-rules && \
          udevadm trigger --action=add --subsystem-match=usb \
-             --attr-match=idVendor=046d --attr-match=idProduct=0a78",
+             --attr-match=idVendor=046d --attr-match=idProduct=0a78 && \
+         udevadm trigger --action=add --subsystem-match=hidraw",
         src = shell_quote(temp_rule.to_string_lossy().as_ref()),
         dst = shell_quote(UDEV_RULE_INSTALL_PATH),
     );
