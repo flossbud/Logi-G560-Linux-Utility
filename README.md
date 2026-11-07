@@ -7,6 +7,7 @@ A Linux alternative to Logitech G HUB for the Logitech G560 gaming speakers. Con
 - **Manual RGB control** for all four speaker zones (left rear, left front, right front, right rear), with brightness and master power.
 - **Content-aware lighting** that samples one selected monitor at ~20 FPS and drives each zone to match the region of the screen nearest to it. Uses the desktop's ScreenCast portal on GNOME/KDE Wayland, and Gamescope's native PipeWire output in Bazzite Gaming Mode.
 - **Tauri GUI**, **CLI**, and a **background user-service** — pick whichever fits your workflow. All three drive the same engine over a local Unix socket.
+- **Tray switch** for Wayland desktops: `logig560-tray` is a StatusNotifierItem icon that toggles screen matching, lights, and static colours over the same socket, with no X11 or toolkit dependency.
 - **Setup persistence.** Monitor authorization, mode, colors, and service state survive reboots.
 - **Runs unprivileged.** The only privileged step is a one-time udev rule install via `pkexec`; the app itself never needs root.
 
@@ -111,6 +112,21 @@ The same binary that powers the service also exposes a CLI. Common commands:
 ```
 
 The first `run` opens the system monitor chooser and stores a restore token at `~/.config/logig560/capture.toml` (mode `0600`). Later runs reuse that authorization. Ctrl-C, SIGTERM, and normal termination all end with an all-zone blackout.
+
+## Tray switch (Wayland)
+
+`logig560-tray` puts a StatusNotifierItem icon in the system tray of KDE Plasma, GNOME with an AppIndicator extension, or any other host that implements the freedesktop StatusNotifier protocol. It needs no X11 and no GUI toolkit; it only speaks D-Bus and the service socket.
+
+```bash
+cargo build --release -p logig560-tray
+./target/release/logig560-tray
+```
+
+- Left-click toggles screen matching. When the service is not running, left-click starts `logig560-desktop.service`.
+- The menu adds *Lights on*, four static colour presets, *Choose monitor…*, *Restart capture*, and *Start service*.
+- The icon colour mirrors the service state: orange for screen matching, blue-grey for a static colour, dark grey for lights off, and a hollow ring while the service is down.
+
+To start it with the session, install `systemd/logig560-tray.service.in` as a user unit with `@LOGIG560_TRAY_BINARY@` replaced by the binary path. The unit wants `logig560-desktop.service`, so enabling the tray also starts the engine at login.
 
 ## Running as a service
 

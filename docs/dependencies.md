@@ -14,6 +14,7 @@
 | `gstreamer-app` | newest-frame appsink access |
 | `gstreamer-video` | video info, format, stride, and mapped frame access |
 | `hdrhistogram` | cumulative capture-to-write latency percentiles |
+| `ksni` (`logig560-tray` only) | StatusNotifierItem tray icon and menu over D-Bus |
 | `palette` | sRGB/linear RGB, Lab sampling, and OKLab transitions |
 | `pipewire` | direct Gamescope node connection and SPA buffer negotiation |
 | `rusb` | libusb fallback transport (`LOGIG560_TRANSPORT=libusb`): interface claim and HID control writes |
