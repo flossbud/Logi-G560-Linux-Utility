@@ -5,7 +5,10 @@ edition = "2024"
 rust-version = "1.97.1"
 
 [workspace]
-members = [".", "crates/logig560-api", "crates/logig560-gui"]
+members = [".", "crates/logig560-api", "crates/logig560-gui", "crates/logig560-tray"]
+# Plain `cargo build`, `cargo test`, and `cargo clippy` cover only the engine.
+# The GUI and the tray switch are optional companions; build them with `-p`.
+default-members = ["."]
 resolver = "3"
 
 [dependencies]

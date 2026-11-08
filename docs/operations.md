@@ -54,6 +54,17 @@ systemctl --user stop logig560-desktop-live.service
 
 Because the unit uses `--collect`, it may disappear after stopping. Wait for that before reusing the same transient name.
 
+### Optional tray switch
+
+`logig560-tray.service` exists only if the user installed the optional tray by hand (see the README). It never owns the USB device and the Desktop unit does not depend on it, so it is not part of the preflight list. Check, stop, or remove it with:
+
+```bash
+systemctl --user is-active logig560-tray.service || true
+systemctl --user disable --now logig560-tray.service
+rm ~/.config/systemd/user/logig560-tray.service
+systemctl --user daemon-reload
+```
+
 ## Gaming Mode
 
 Build release first, then install/enable:

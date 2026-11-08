@@ -13,3 +13,4 @@ fi
 pkexec install -o root -g root -m 0644 "${source_rule}" "${destination_rule}"
 pkexec udevadm control --reload-rules
 pkexec udevadm trigger --action=add --subsystem-match=usb --attr-match=idVendor=046d --attr-match=idProduct=0a78
+pkexec udevadm trigger --action=add --subsystem-match=hidraw

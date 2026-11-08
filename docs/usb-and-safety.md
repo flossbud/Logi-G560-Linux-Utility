@@ -13,7 +13,18 @@
 | Transfer timeout | 100 ms |
 | Production report spacing | 6 ms |
 
-The driver validates every alternate descriptor for interface 2 as HID before detaching a kernel driver. If claim fails after detach, it attempts reattachment and preserves both errors if reattachment also fails. `Drop` releases the interface and reattaches the original kernel driver when needed.
+The libusb transport validates every alternate descriptor for interface 2 as HID before detaching a kernel driver. If claim fails after detach, it attempts reattachment and preserves both errors if reattachment also fails. `Drop` releases the interface and reattaches the original kernel driver when needed.
+
+## Transports
+
+`open_transport` in `src/usb/device.rs` selects how reports reach the device:
+
+| `LOGIG560_TRANSPORT` | Transport | Kernel HID driver | Speaker buttons |
+|---|---|---|---|
+| unset or `hidraw` (default) | `HidrawTransport`: `write(2)` of the 20-byte report to the hidraw node of interface 2 | stays attached | keep working |
+| `libusb` | `LibUsbTransport`: SET_REPORT control transfer on the claimed interface | detached while open, reattached on drop | dead while the utility runs |
+
+The hidraw node is found by walking `/sys/class/hidraw`, matching `HID_ID=0003:0000046D:00000A78` in the device `uevent`, and requiring `bInterfaceNumber` `02` on the parent USB interface. Byte 0 of the buffer is the HID++ long report number (`0x11`); for numbered reports the kernel forwards the buffer unchanged, so the device receives exactly the bytes the control transfer sends. Both transports share the pacing, coalescing, worker, and recovery behavior described below.
 
 ## Solid-color report
 
@@ -116,6 +127,7 @@ Runtime remains unprivileged. `contrib/70-g560.rules` grants the active local us
 
 ```udev
 ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="046d", ATTR{idProduct}=="0a78", TAG+="uaccess"
+ACTION=="add", SUBSYSTEM=="hidraw", ATTRS{idVendor}=="046d", ATTRS{idProduct}=="0a78", TAG+="uaccess"
 ```
 
 `scripts/install-udev-rule.sh` uses `pkexec` only to copy that specific rule and reload/trigger udev. Never solve access problems by running G560 Linux Utility with `sudo`.

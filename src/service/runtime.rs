@@ -21,7 +21,7 @@ use crate::{
     ZoneColors, ZoneLayout,
     capture::{CaptureError, GStreamerFrameSource, GamescopeFrameSource, PortalCapture},
     config_path, run_engine_with_metrics,
-    usb::{AsyncG560, G560, LibUsbTransport},
+    usb::{AsyncG560, G560, UsbTransport, open_transport},
 };
 
 use super::{
@@ -82,8 +82,8 @@ pub async fn run_service(options: ServiceOptions) -> Result<()> {
     info!(socket = %socket_path.display(), "lighting service listening");
 
     let mut sink = RecoveringLightSink::new(
-        || -> Result<AsyncG560<LibUsbTransport>> {
-            let mut device = G560::new(LibUsbTransport::open()?);
+        || -> Result<AsyncG560<Box<dyn UsbTransport>>> {
+            let mut device = G560::new(open_transport()?);
             device.blackout()?;
             Ok(AsyncG560::new(device))
         },
@@ -217,8 +217,8 @@ fn publish_snapshot(
 async fn service_loop(
     model: &mut ControllerModel,
     sink: &mut RecoveringLightSink<
-        impl FnMut() -> Result<AsyncG560<LibUsbTransport>> + Send,
-        AsyncG560<LibUsbTransport>,
+        impl FnMut() -> Result<AsyncG560<Box<dyn UsbTransport>>> + Send,
+        AsyncG560<Box<dyn UsbTransport>>,
     >,
     sink_metrics: &RecoveryMetrics,
     snapshot_tx: &watch::Sender<ServiceSnapshot>,
@@ -300,12 +300,12 @@ async fn service_loop(
 async fn dispatch_proxy_command<F>(
     command: ProxyCommand,
     model: &mut ControllerModel,
-    sink: &mut RecoveringLightSink<F, AsyncG560<LibUsbTransport>>,
+    sink: &mut RecoveringLightSink<F, AsyncG560<Box<dyn UsbTransport>>>,
     sink_metrics: &RecoveryMetrics,
     snapshot_tx: &watch::Sender<ServiceSnapshot>,
     engine: Option<&EngineHandle>,
 ) where
-    F: FnMut() -> Result<AsyncG560<LibUsbTransport>> + Send,
+    F: FnMut() -> Result<AsyncG560<Box<dyn UsbTransport>>> + Send,
 {
     match command {
         ProxyCommand::Write(write) => {
@@ -337,13 +337,13 @@ async fn dispatch_proxy_command<F>(
 
 async fn apply_manual_write<F>(
     model: &mut ControllerModel,
-    sink: &mut RecoveringLightSink<F, AsyncG560<LibUsbTransport>>,
+    sink: &mut RecoveringLightSink<F, AsyncG560<Box<dyn UsbTransport>>>,
     colors: ZoneColors,
     snapshot_tx: &watch::Sender<ServiceSnapshot>,
     sink_metrics: &RecoveryMetrics,
     engine: &Option<EngineHandle>,
 ) where
-    F: FnMut() -> Result<AsyncG560<LibUsbTransport>> + Send,
+    F: FnMut() -> Result<AsyncG560<Box<dyn UsbTransport>>> + Send,
 {
     model.mark_pending();
     publish_snapshot(model, engine.as_ref(), sink_metrics, snapshot_tx);
@@ -363,7 +363,7 @@ async fn apply_manual_write<F>(
 async fn handle_client_command<F>(
     command: ClientCommand,
     model: &mut ControllerModel,
-    sink: &mut RecoveringLightSink<F, AsyncG560<LibUsbTransport>>,
+    sink: &mut RecoveringLightSink<F, AsyncG560<Box<dyn UsbTransport>>>,
     sink_metrics: &RecoveryMetrics,
     snapshot_tx: &watch::Sender<ServiceSnapshot>,
     engine: &mut Option<EngineHandle>,
@@ -374,7 +374,7 @@ async fn handle_client_command<F>(
     shutdown: &CancellationToken,
 ) -> RequestResult
 where
-    F: FnMut() -> Result<AsyncG560<LibUsbTransport>> + Send,
+    F: FnMut() -> Result<AsyncG560<Box<dyn UsbTransport>>> + Send,
 {
     let effect = match command {
         ClientCommand::GetSnapshot => {

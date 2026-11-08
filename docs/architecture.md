@@ -75,7 +75,7 @@ Desktop `run` uses `PortalFrameSourceFactory`; Gaming `run-gaming` uses `Gamesco
 - Sends colors to `LightSink::write_update`, which can report rendered, unchanged, or expired.
 - Clears normal state and sends black immediately for a safety command.
 
-The USB sink itself owns a dedicated standard thread, so synchronous libusb calls and the calibrated inter-report delay never block Tokio worker threads.
+The USB sink itself owns a dedicated standard thread, so synchronous hidraw or libusb calls and the calibrated inter-report delay never block Tokio worker threads.
 
 ## Newest-value design
 

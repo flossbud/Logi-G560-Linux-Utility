@@ -1,0 +1,16 @@
+[package]
+name = "logig560-tray"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97.1"
+description = "StatusNotifierItem tray switch for the G560 Linux Utility lighting service"
+
+[dependencies]
+anyhow = "1.0"
+ksni = { version = "0.3", features = ["blocking"] }
+logig560-api = { path = "../logig560-api" }
+serde_json = "1.0"
+
+[[bin]]
+name = "logig560-tray"
+path = "src/main.rs"

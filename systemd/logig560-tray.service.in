@@ -1,0 +1,16 @@
+[Unit]
+Description=G560 Linux Utility tray switch
+After=graphical-session.target logig560-desktop.service
+Wants=logig560-desktop.service
+PartOf=graphical-session.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+ExecStart=@LOGIG560_TRAY_BINARY@
+Restart=on-failure
+RestartSec=2s
+TimeoutStopSec=10s
+
+[Install]
+WantedBy=graphical-session.target

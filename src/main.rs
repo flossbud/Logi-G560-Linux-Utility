@@ -11,7 +11,7 @@ use logig560::{
     capture::{GStreamerFrameSource, GamescopeFrameSource, PortalCapture},
     config_path, sample_zones,
     service::{ServiceOptions, run_service},
-    usb::{G560, LibUsbTransport},
+    usb::{G560, UsbTransport, open_transport},
 };
 use tokio_util::sync::CancellationToken;
 
@@ -93,7 +93,7 @@ async fn main() -> Result<()> {
             right_front,
             right_rear,
         } => {
-            let mut device = G560::new(LibUsbTransport::open()?);
+            let mut device = G560::new(open_transport()?);
             device.write(ZoneColors([
                 left_rear.0,
                 left_front.0,
@@ -102,11 +102,11 @@ async fn main() -> Result<()> {
             ]))?;
         }
         Command::VerifyZone { protocol_index } => {
-            let mut device = G560::new(LibUsbTransport::open()?);
+            let mut device = G560::new(open_transport()?);
             device.pulse_protocol_zone(protocol_index, Duration::from_secs(12))?;
         }
         Command::VerifySoak => {
-            let mut device = G560::new(LibUsbTransport::open()?);
+            let mut device = G560::new(open_transport()?);
             let mut colors = [
                 Rgb8 { r: 255, g: 0, b: 0 },
                 Rgb8 { r: 0, g: 255, b: 0 },
@@ -130,8 +130,7 @@ async fn main() -> Result<()> {
         }
         Command::CalibratePacing { delay_ms, seconds } => {
             let delay = Duration::from_millis(delay_ms);
-            let mut device =
-                G560::<LibUsbTransport>::open_diagnostic(delay, LibUsbTransport::open)?;
+            let mut device = G560::<Box<dyn UsbTransport>>::open_diagnostic(delay, open_transport)?;
             println!(
                 "starting diagnostic USB pacing calibration: delay_ms={delay_ms} duration_s={seconds}; configuration writes: 0"
             );
