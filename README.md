@@ -23,6 +23,7 @@ A Linux alternative to Logitech G HUB for the Logitech G560 gaming speakers. Con
 - A Wayland session with PipeWire and an XDG ScreenCast portal (GNOME and KDE are the primary targets; Bazzite Gaming Mode uses Gamescope directly)
 - Rust 1.97.1 (pinned by `rust-toolchain.toml`)
 - GStreamer 1.x, PipeWire, and libusb — headers to build, runtime libraries and plugins to run
+- The default transport writes through the speakers' hidraw node, so the kernel HID driver stays attached and the volume and G buttons keep working. `LOGIG560_TRANSPORT=libusb` selects the original libusb path, which detaches the kernel driver while the utility runs.
 
 ## Install
 
@@ -58,7 +59,7 @@ Bazzite's host is immutable — build inside a Distrobox/Toolbox, then run the r
 
 ### One-time USB permission
 
-Install the narrowly scoped udev rule for `046d:0a78`. The script uses Polkit only for the rule install and `udevadm` reload; the utility itself stays unprivileged.
+Install the narrowly scoped udev rule for `046d:0a78` (the USB device and its hidraw node). The script uses Polkit only for the rule install and `udevadm` reload; the utility itself stays unprivileged.
 
 ```bash
 ./scripts/install-udev-rule.sh

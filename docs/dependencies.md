@@ -16,7 +16,7 @@
 | `hdrhistogram` | cumulative capture-to-write latency percentiles |
 | `palette` | sRGB/linear RGB, Lab sampling, and OKLab transitions |
 | `pipewire` | direct Gamescope node connection and SPA buffer negotiation |
-| `rusb` | G560 interface claim and HID control writes |
+| `rusb` | libusb fallback transport (`LOGIG560_TRANSPORT=libusb`): interface claim and HID control writes |
 | `serde`, `toml` | private portal restore-token config |
 | `thiserror` | typed capture and USB errors |
 | `tokio`, `tokio-util` | async runtime, channels, signals, time, cancellation |
@@ -81,7 +81,7 @@ Gaming requires:
 - PipeWire runtime library;
 - user systemd session.
 
-Both require libusb runtime and udev-granted access to `046d:0a78`.
+Both require the libusb runtime library (linked by `rusb`) and udev-granted access to `046d:0a78`, including its hidraw node.
 
 ## Why native headers are needed even when one backend is unused
 

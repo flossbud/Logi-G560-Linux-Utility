@@ -1,3 +1,6 @@
+use std::fs::{self, File, OpenOptions};
+use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, SyncSender};
 use std::sync::{
     Arc,
@@ -41,6 +44,10 @@ pub enum UsbError {
     InvalidZoneIndex(u8),
     #[error("invalid USB report delay {0:?}; expected at least 1 ms")]
     InvalidReportDelay(Duration),
+    #[error("hidraw I/O failed: {0}")]
+    Hidraw(#[source] std::io::Error),
+    #[error("unknown USB transport {0:?}; expected \"hidraw\" or \"libusb\"")]
+    UnknownTransport(String),
 }
 
 #[derive(Debug)]
@@ -154,6 +161,92 @@ impl UsbTransport for LibUsbTransport {
             });
         }
         Ok(())
+    }
+}
+
+/// Transport that writes reports through the kernel's hidraw node for the
+/// G560 HID++ interface.
+///
+/// Unlike [`LibUsbTransport`] it leaves `usbhid` bound to the interface, so
+/// the speaker's volume and G buttons keep delivering input events while the
+/// lights are driven. The kernel forwards the buffer unchanged: byte 0 is the
+/// HID++ long report number (`0x11`), exactly as in the SET_REPORT control
+/// transfer the libusb path issues.
+pub struct HidrawTransport {
+    file: File,
+}
+
+impl HidrawTransport {
+    pub fn open() -> Result<Self, UsbError> {
+        let path = find_hidraw_node(Path::new(HIDRAW_CLASS_DIR))?;
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&path)
+            .map_err(UsbError::Hidraw)?;
+        Ok(Self { file })
+    }
+}
+
+impl UsbTransport for HidrawTransport {
+    fn write_report(&mut self, report: &[u8; REPORT_LEN]) -> Result<(), UsbError> {
+        let written = self.file.write(report).map_err(UsbError::Hidraw)?;
+        if written != REPORT_LEN {
+            return Err(UsbError::ShortWrite {
+                expected: REPORT_LEN,
+                actual: written,
+            });
+        }
+        Ok(())
+    }
+}
+
+const HIDRAW_CLASS_DIR: &str = "/sys/class/hidraw";
+/// `HID_ID` line written by the kernel into the hidraw device `uevent`:
+/// bus 0x0003 (USB), vendor 0x046d, product 0x0a78.
+const HIDRAW_HID_ID: &str = "HID_ID=0003:0000046D:00000A78";
+
+/// Locate the hidraw node bound to the G560's HID++ interface by walking the
+/// hidraw class directory. Each entry's `device` link points at the HID
+/// device, whose parent is the USB interface carrying `bInterfaceNumber`.
+fn find_hidraw_node(class_dir: &Path) -> Result<PathBuf, UsbError> {
+    let entries = fs::read_dir(class_dir).map_err(UsbError::Hidraw)?;
+    for entry in entries {
+        let entry = entry.map_err(UsbError::Hidraw)?;
+        let device = entry.path().join("device");
+        let Ok(uevent) = fs::read_to_string(device.join("uevent")) else {
+            continue;
+        };
+        if !uevent.lines().any(|line| line.trim() == HIDRAW_HID_ID) {
+            continue;
+        }
+        let Ok(interface) = fs::read_to_string(device.join("../bInterfaceNumber")) else {
+            continue;
+        };
+        if u8::from_str_radix(interface.trim(), 16) != Ok(INTERFACE) {
+            continue;
+        }
+        return Ok(PathBuf::from("/dev").join(entry.file_name()));
+    }
+    Err(UsbError::DeviceNotFound)
+}
+
+/// Open the report transport selected by `LOGIG560_TRANSPORT`.
+///
+/// `hidraw` (the default) keeps the kernel HID driver attached so the speaker
+/// buttons keep working; `libusb` detaches it and claims the interface, which
+/// is the original behaviour and a fallback when no hidraw node is exposed.
+pub fn open_transport() -> Result<Box<dyn UsbTransport>, UsbError> {
+    match std::env::var("LOGIG560_TRANSPORT").as_deref() {
+        Err(_) | Ok("") | Ok("hidraw") => Ok(Box::new(HidrawTransport::open()?)),
+        Ok("libusb") => Ok(Box::new(LibUsbTransport::open()?)),
+        Ok(other) => Err(UsbError::UnknownTransport(other.to_owned())),
+    }
+}
+
+impl UsbTransport for Box<dyn UsbTransport> {
+    fn write_report(&mut self, report: &[u8; REPORT_LEN]) -> Result<(), UsbError> {
+        (**self).write_report(report)
     }
 }
 
@@ -983,5 +1076,60 @@ mod tests {
                 reattach: rusb::Error::NotFound,
             }
         ));
+    }
+}
+
+#[cfg(test)]
+mod hidraw_tests {
+    use super::*;
+    use std::os::unix::fs::symlink;
+
+    /// Build a fake hidraw class directory: `class/<node>/device` links to a
+    /// HID device directory whose parent carries `bInterfaceNumber`.
+    fn add_node(root: &Path, node: &str, hid_id: &str, interface: &str) {
+        let iface_dir = root.join("devices").join(node);
+        let hid_dir = iface_dir.join("hid");
+        fs::create_dir_all(&hid_dir).unwrap();
+        fs::write(iface_dir.join("bInterfaceNumber"), format!("{interface}\n")).unwrap();
+        fs::write(
+            hid_dir.join("uevent"),
+            format!("DRIVER=hid-generic\n{hid_id}\nHID_NAME=Logitech G560 Gaming Speaker\n"),
+        )
+        .unwrap();
+        let class_node = root.join("class").join(node);
+        fs::create_dir_all(&class_node).unwrap();
+        symlink(&hid_dir, class_node.join("device")).unwrap();
+    }
+
+    #[test]
+    fn finds_the_g560_hid_plus_plus_interface_only() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        add_node(root, "hidraw0", "HID_ID=0003:0000046D:0000C33F", "02");
+        add_node(root, "hidraw1", "HID_ID=0003:0000046D:00000A78", "00");
+        add_node(root, "hidraw2", "HID_ID=0003:0000046D:00000A78", "02");
+        let found = find_hidraw_node(&root.join("class")).unwrap();
+        assert_eq!(found, PathBuf::from("/dev/hidraw2"));
+    }
+
+    #[test]
+    fn missing_speaker_reports_device_not_found() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        add_node(root, "hidraw0", "HID_ID=0003:0000046D:0000C33F", "02");
+        let error = find_hidraw_node(&root.join("class")).unwrap_err();
+        assert!(matches!(error, UsbError::DeviceNotFound), "{error:?}");
+    }
+
+    #[test]
+    fn unknown_transport_name_is_rejected() {
+        // Serialise env access with the other tests in this module.
+        unsafe { std::env::set_var("LOGIG560_TRANSPORT", "serial") };
+        let result = open_transport();
+        unsafe { std::env::remove_var("LOGIG560_TRANSPORT") };
+        let Err(error) = result else {
+            panic!("an unknown transport name must be rejected");
+        };
+        assert!(matches!(error, UsbError::UnknownTransport(name) if name == "serial"));
     }
 }
