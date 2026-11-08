@@ -7,7 +7,7 @@ A Linux alternative to Logitech G HUB for the Logitech G560 gaming speakers. Con
 - **Manual RGB control** for all four speaker zones (left rear, left front, right front, right rear), with brightness and master power.
 - **Content-aware lighting** that samples one selected monitor at ~20 FPS and drives each zone to match the region of the screen nearest to it. Uses the desktop's ScreenCast portal on GNOME/KDE Wayland, and Gamescope's native PipeWire output in Bazzite Gaming Mode.
 - **Tauri GUI**, **CLI**, and a **background user-service** — pick whichever fits your workflow. All three drive the same engine over a local Unix socket.
-- **Tray switch** for Wayland desktops: `logig560-tray` is a StatusNotifierItem icon that toggles screen matching, lights, and static colours over the same socket, with no X11 or toolkit dependency.
+- **Optional tray switch** for Wayland desktops: `logig560-tray` is a separate StatusNotifierItem binary that toggles screen matching, lights, and static colours over the same socket, with no X11 or toolkit dependency. Nothing else depends on it, and the default build leaves it out.
 - **Setup persistence.** Monitor authorization, mode, colors, and service state survive reboots.
 - **Runs unprivileged.** The only privileged step is a one-time udev rule install via `pkexec`; the app itself never needs root.
 
@@ -113,7 +113,9 @@ The same binary that powers the service also exposes a CLI. Common commands:
 
 The first `run` opens the system monitor chooser and stores a restore token at `~/.config/logig560/capture.toml` (mode `0600`). Later runs reuse that authorization. Ctrl-C, SIGTERM, and normal termination all end with an all-zone blackout.
 
-## Tray switch (Wayland)
+## Optional tray switch (Wayland)
+
+The tray is an opt-in companion. The engine, CLI, GUI, and service units neither build nor require it: `cargo build --release` produces only `logig560`, and nothing in the repository references the tray binary or its unit. Skip this section if you do not want a tray icon.
 
 `logig560-tray` puts a StatusNotifierItem icon in the system tray of KDE Plasma, GNOME with an AppIndicator extension, or any other host that implements the freedesktop StatusNotifier protocol. It needs no X11 and no GUI toolkit; it only speaks D-Bus and the service socket.
 
@@ -126,7 +128,23 @@ cargo build --release -p logig560-tray
 - The menu adds *Lights on*, four static colour presets, *Choose monitor…*, *Restart capture*, and *Start service*.
 - The icon colour mirrors the service state: orange for screen matching, blue-grey for a static colour, dark grey for lights off, and a hollow ring while the service is down.
 
-To start it with the session, install `systemd/logig560-tray.service.in` as a user unit with `@LOGIG560_TRAY_BINARY@` replaced by the binary path. The unit wants `logig560-desktop.service`, so enabling the tray also starts the engine at login.
+To start it with the session, install `systemd/logig560-tray.service.in` as a user unit with `@LOGIG560_TRAY_BINARY@` replaced by the binary path:
+
+```bash
+mkdir -p ~/.config/systemd/user
+sed "s|@LOGIG560_TRAY_BINARY@|$PWD/target/release/logig560-tray|" \
+  systemd/logig560-tray.service.in > ~/.config/systemd/user/logig560-tray.service
+systemctl --user daemon-reload
+systemctl --user enable --now logig560-tray.service
+```
+
+The tray unit wants `logig560-desktop.service`, so enabling the tray also starts the engine at login. The dependency only runs in that direction: the Desktop unit does not reference the tray, so removing the tray leaves the engine untouched.
+
+```bash
+systemctl --user disable --now logig560-tray.service
+rm ~/.config/systemd/user/logig560-tray.service
+systemctl --user daemon-reload
+```
 
 ## Running as a service
 

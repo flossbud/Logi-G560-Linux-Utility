@@ -12,7 +12,8 @@ G560 Linux Utility is an accepted command-line prototype for low-latency, four-z
 - `src/service/` — Unix-socket service (`$XDG_RUNTIME_DIR/logig560.sock`) exposed by the existing `run`/`run-gaming` commands. Reuses the accepted engine, capture backends, and USB writer unchanged.
 - `crates/logig560-gui/` — Tauri 2 GUI with a framework-free HTML/CSS/JS frontend. Ships the mockup speakers, four rail pages, first-run overlay, `pkexec` udev installer, systemd user-unit installer, and color-free diagnostics.
 - `systemd/logig560-desktop.service.in` — template used by the GUI to install a per-user Desktop service against the current binary path.
-- `systemd/logig560-tray.service.in` — template for the per-user tray switch unit (`logig560-tray`), installed next to the Desktop service
+- `crates/logig560-tray/` — optional StatusNotifierItem tray switch (`logig560-tray`). A separate binary that speaks the same socket protocol; not a default workspace member, and nothing else depends on it.
+- `systemd/logig560-tray.service.in` — template for the optional per-user tray unit. Installed only by hand; the Desktop unit does not reference it.
 
 ## Proven working
 

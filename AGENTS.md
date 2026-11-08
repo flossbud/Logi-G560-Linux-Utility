@@ -23,6 +23,7 @@ Read these documents in order before changing runtime behavior:
 - The three Bazzite snapshot archives remain intentionally untracked evidence. Do not discard, reset, clean, or treat them as generated junk.
 - The original Fedora-transfer archive and the later final snapshot archive are evidence/artifacts, not build inputs.
 - There is no configured Git remote in the accepted workspace. Do not publish or commit unless the owner explicitly asks.
+- The tray switch in `crates/logig560-tray/` is optional. Keep it out of the default build (`default-members` in `Cargo.toml`) and keep the engine, GUI, scripts, and service units free of any reference to it, so the project works the same with the crate deleted.
 
 Always run `git status --short` before editing. Preserve unrelated changes.
 
@@ -77,6 +78,7 @@ The host lacks PipeWire development metadata, so a direct host `cargo build` or 
 | Latest-only channel | `src/latest.rs` | one unread value, replacement accounting |
 | USB | `src/usb/device.rs`, `src/usb/protocol.rs` | device claim, HID encoding, 6 ms pacing, async worker, blackout |
 | Integration | `systemd/`, `scripts/`, `contrib/` | Gaming service and udev access |
+| Tray (optional) | `crates/logig560-tray/` | StatusNotifierItem switch over the service socket; separate opt-in binary, nothing depends on it |
 
 ## Change routing
 
